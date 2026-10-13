@@ -65,7 +65,7 @@ def fake_outputs(lang):
 
 def simulate(lang, config_path):
     yes = "j" if lang == "de" else "y"
-    console = ScriptedConsole([PLACEHOLDER_APP_ID, yes, "", "", "", ""])
+    console = ScriptedConsole([PLACEHOLDER_APP_ID, yes, "", "", "example.com", "", ""])
     system = FakeSystem(
         console,
         python=(3, 13, 1),

@@ -20,9 +20,9 @@ def test_load_secrets_exits_with_message_when_missing(capsys):
     assert "store_secrets.py" in capsys.readouterr().err
 
 
-def test_load_limits_exits_on_invalid_configuration(capsys):
+def test_load_policy_exits_on_invalid_configuration(capsys):
     with pytest.raises(SystemExit) as exc:
-        launch_secure.load_limits({"META_GUARD_MAX_DAILY_BUDGET": "unlimited"})
+        launch_secure.load_policy({"META_GUARD_MAX_DAILY_BUDGET": "unlimited"})
 
     assert exc.value.code != 0
     assert "META_GUARD_MAX_DAILY_BUDGET" in capsys.readouterr().err

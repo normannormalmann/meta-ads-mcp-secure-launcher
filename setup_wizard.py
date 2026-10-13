@@ -16,6 +16,7 @@ import textwrap
 from datetime import datetime
 from pathlib import Path
 
+import url_policy
 from i18n import LANGUAGES, add_language_argument, detect_language, t
 
 ROOT = Path(__file__).resolve().parent
@@ -44,16 +45,23 @@ def find_claude_config(environ):
     return Path(roaming, "Claude", "claude_desktop_config.json") if roaming else None
 
 
-def build_server_entry(python_exe, launcher, app_id, daily_limit, lifetime_limit):
-    return {
-        "command": str(python_exe),
-        "args": [str(launcher)],
-        "env": {
-            "META_APP_ID": app_id,
-            "META_GUARD_MAX_DAILY_BUDGET": str(daily_limit),
-            "META_GUARD_MAX_LIFETIME_BUDGET": str(lifetime_limit),
-        },
+def build_server_entry(python_exe, launcher, app_id, daily_limit, lifetime_limit, allowed_domains=""):
+    env = {
+        "META_APP_ID": app_id,
+        "META_GUARD_MAX_DAILY_BUDGET": str(daily_limit),
+        "META_GUARD_MAX_LIFETIME_BUDGET": str(lifetime_limit),
     }
+    if allowed_domains:
+        env[url_policy.ENV_ALLOWED_DOMAINS] = allowed_domains
+    return {"command": str(python_exe), "args": [str(launcher)], "env": env}
+
+
+def is_valid_domain_list(value):
+    try:
+        url_policy.parse_domains(value)
+    except ValueError:
+        return False
+    return True
 
 
 def _has_secrets(server):
@@ -121,6 +129,7 @@ class Wizard:
         self.python = venv_python(root)
         self.app_id = None
         self.limits = (DEFAULT_DAILY_LIMIT, DEFAULT_LIFETIME_LIMIT)
+        self.allowed_domains = ""
 
     # --- output helpers -------------------------------------------------
     def _t(self, key, **values):
@@ -168,7 +177,7 @@ class Wizard:
             self._warn("invalid_choice")
 
     def _ask_value(self, key, default, is_valid, error_key):
-        suffix = f" [{default}]" if default is not None else ""
+        suffix = f" [{default}]" if default not in (None, "") else ""
         while True:
             answer = self.console.ask(self._wrap(f"{self._t(key)}{suffix}:", "[?]  ") + " ").strip() or (str(default) if default is not None else "")
             if is_valid(answer):
@@ -266,11 +275,13 @@ class Wizard:
         daily = self._ask_value("ask_daily", DEFAULT_DAILY_LIMIT, is_positive, "err_amount")
         lifetime = self._ask_value("ask_lifetime", DEFAULT_LIFETIME_LIMIT, is_positive, "err_amount")
         self.limits = (int(daily), int(lifetime))
+        domains = self._ask_value("ask_domains", "", is_valid_domain_list, "err_domains")
+        self.allowed_domains = ",".join(sorted(url_policy.parse_domains(domains)))
         return True
 
     def configure_claude(self):
         self._heading(7, "step_claude")
-        entry = build_server_entry(self.python, self.root / "launch_secure.py", self.app_id, *self.limits)
+        entry = build_server_entry(self.python, self.root / "launch_secure.py", self.app_id, *self.limits, self.allowed_domains)
         if self.config_path is None:
             self._warn("claude_config_missing")
             self._json({"mcpServers": {SERVER_NAME: entry}})

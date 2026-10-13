@@ -21,6 +21,7 @@ The launcher does not modify `meta-ads-mcp`. It installs the upstream package fr
 - [Manual setup](#manual-setup)
 - [Configuration reference](#configuration-reference)
 - [Write guard](#write-guard)
+- [Tool annotations](#tool-annotations)
 - [Token check](#token-check)
 - [Updating](#updating)
 - [Troubleshooting](#troubleshooting)
@@ -46,6 +47,9 @@ The typical `meta-ads-mcp` setup puts `META_APP_SECRET` and `META_ACCESS_TOKEN` 
 - **No plain-text credentials** – app secret and token live in the Windows Credential Manager (DPAPI, bound to your Windows account). The Claude Desktop configuration only contains the non-secret App ID.
 - **Hardened logging** – tokens and `appsecret_proof` are masked, debug output is suppressed, the log is UTF-8 and rotated (max. 3 × 5 MB).
 - **Write guard** – blocks `DELETE`, the statuses `DELETED`/`ARCHIVED`, and budgets above configurable limits before the request leaves your machine. Claude receives a clear error message.
+- **Destination allowlist** – optionally restricts ad links to your own domains, so a prompt injection cannot redirect your ads to someone else's site.
+- **No data to Pipeboard** – requests to Pipeboard's servers are blocked unless you explicitly allow them.
+- **Tool annotations** – all 41 upstream tools are marked as read-only, additive or destructive (MCP `readOnlyHint`/`destructiveHint`). Tools with large results declare `anthropic/maxResultSizeChars` for Claude Code.
 - **Token check** – shows validity, expiry and permissions without ever printing the token, and warns about upcoming expiry and unneeded permissions. Suitable as a scheduled task.
 - **Setup wizard** – installs everything, stores the credentials with visible feedback (length and last 4 characters), checks the token and writes the Claude Desktop entry after asking, with a backup.
 - **Bilingual** – the wizard and the helper scripts speak English and German.
@@ -154,6 +158,8 @@ Do **not** put `META_APP_SECRET` or `META_ACCESS_TOKEN` into this file.
 | `META_APP_ID` | Claude Desktop entry | – (required) | ID of your Meta app (not secret) |
 | `META_GUARD_MAX_DAILY_BUDGET` | Claude Desktop entry | `250` | Maximum daily budget per object, in account currency |
 | `META_GUARD_MAX_LIFETIME_BUDGET` | Claude Desktop entry | `5000` | Maximum lifetime budget / spend cap per object, in account currency |
+| `META_GUARD_ALLOWED_URL_DOMAINS` | Claude Desktop entry | empty (rule off) | Comma-separated domains that ad links may point to, e.g. `example.com,shop.example.org` (subdomains included) |
+| `META_GUARD_ALLOW_PIPEBOARD` | Claude Desktop entry | off | `1` allows requests to Pipeboard's servers |
 | `META_MCP_LANG` | environment | system language | `de` or `en` for the wizard and the helper scripts |
 
 Set automatically by the launcher: `META_ADS_DISABLE_CALLBACK_SERVER=1` and `META_ADS_DISABLE_LOGIN_LINK=1`.
@@ -172,10 +178,27 @@ Log file: `%APPDATA%\meta-ads-mcp\meta_ads_debug.log` (+ `.1` to `.3`).
 | Lifetime budget | `lifetime_budget`, `spend_cap`, `lifetime_spend_cap`, `lifetime_min_spend_target` above `META_GUARD_MAX_LIFETIME_BUDGET` |
 | Budget schedules | `ABSOLUTE` increases above the daily limit, `MULTIPLIER` above 2 |
 | Unknown format | write requests whose body is not form-encoded (fail-closed) |
+| Destinations | only if `META_GUARD_ALLOWED_URL_DOMAINS` is set: a `link`, `website_url`, `template_url` or `deeplink_url` (also nested in `object_story_spec`/`asset_feed_spec`) that is not `https`, points outside the allowed domains or to an IP address, or contains user info. `display_url` and `url_tags` are not checked. Unparseable specs are blocked. |
+| Pipeboard | any request to `mcp.pipeboard.co`, `meta-ads.mcp.pipeboard.co` or the host in `PIPEBOARD_API_BASE_URL`, unless `META_GUARD_ALLOW_PIPEBOARD=1` |
 
 A blocked call never leaves your machine. Claude receives a Graph-style error (`Blocked by local write guard: …`), and the event is logged as a warning.
 
 **Limits:** the guard checks single requests. It does not enforce account-wide totals (many campaigns at the limit are still possible), and it does not limit `bid_amount`/`bid_cap`. Combine it with *"Always ask"* in Claude Desktop and, ideally, a spending limit on the ad account in Meta.
+
+The Pipeboard rule is defence in depth: the optional `duplicate_*` tools of `meta-ads-mcp` send campaign data to Pipeboard's servers. With Claude Desktop (stdio) they currently stop earlier, because they expect a Pipeboard token in an HTTP header. The rule makes sure the data stays local if that changes.
+
+## Tool annotations
+
+`meta-ads-mcp` does not tell clients which tools only read data. The launcher adds [MCP tool annotations](https://modelcontextprotocol.io/specification/2025-06-18/server/tools) to every tool (`tool_policy.py`):
+
+| Category | Tools | Annotations |
+|---|---|---|
+| Read | `get_*`, `search_*`, `estimate_audience_size`, `compute_image_crops`, `generate_report` | `readOnlyHint` |
+| Add | `create_ad`, `create_adset`, `create_campaign`, `create_ad_creative`, `upload_ad_image`, `duplicate_*` | not read-only, not destructive |
+| Modify | `update_*`, `create_budget_schedule` | `destructiveHint` |
+| Local file | `save_ad_image_locally` | not read-only, no network |
+
+A test fails as soon as an upstream update adds a tool that is not classified. At runtime, unknown tools are treated as destructive. `get_insights`, `get_ads`, `get_adsets` and `get_campaigns` also declare `anthropic/maxResultSizeChars` (500k/250k/150k/100k), which Claude Code uses to keep large results in the conversation. Whether Claude Desktop uses the annotations or this value is not documented. Setting tools to *"Always ask"* remains the reliable way.
 
 ## Token check
 
@@ -217,7 +240,7 @@ Check the result with [`pip-audit`](https://pypi.org/project/pip-audit/) (`pip-a
 
 ## Security model and limitations
 
-- **Protects against:** credentials in config files, backups and support uploads; tokens in log files; accidental or injected destructive write calls; unnecessary local network services.
+- **Protects against:** credentials in config files, backups and support uploads; tokens in log files; accidental or injected destructive write calls; ad links redirected to foreign domains (with the allowlist); campaign data sent to third-party servers; unnecessary local network services.
 - **Does not protect against:** malware running under your Windows account. It can read the Credential Manager just like the launcher. It also does not protect against changes you approve yourself, or against everything the Meta permissions of the token allow outside of `meta-ads-mcp`.
 - The write guard works by wrapping `httpx`. A future upstream version that uses another HTTP client would bypass it. Pinned versions and the self-test exist for that reason.
 - Windows only.
@@ -235,12 +258,15 @@ venv\Scripts\python.exe -m tools.render_screenshots   # regenerate docs/screensh
 |---|---|
 | `launch_secure.py` | Entry point for Claude Desktop |
 | `secure_logging.py` | Masking, log level, rotation |
-| `write_guard.py` | Rules for write calls |
+| `write_guard.py` | Rules for write calls and blocked hosts |
+| `url_policy.py` | Allowed ad destination domains |
+| `tool_policy.py` | Tool annotations and result-size metadata |
 | `store_secrets.py` | Store credentials (hidden input, `--status`) |
 | `check_token.py` | Token validity, expiry, permissions |
 | `setup_wizard.py` | Setup wizard (standard library only) |
 | `i18n.py` | English/German messages |
 | `tools/` | Screenshot rendering and test doubles |
+| `tests/test_upstream_invariants.py` | Fails when an upstream update adds unclassified tools or HTTP clients other than `httpx` |
 
 ## License
 

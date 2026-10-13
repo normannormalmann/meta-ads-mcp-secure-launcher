@@ -1,31 +1,43 @@
-"""Local safety net for write calls to the Meta Graph API.
+"""Local safety net for requests of meta-ads-mcp.
 
-Hooks httpx.AsyncClient.send, which every Graph API request of meta-ads-mcp
-passes through, and rejects writes that exceed budget limits or would delete
-or archive objects. Blocked calls never leave the machine; Claude receives a
-Graph-style error explaining the rule. Limits apply per request/object, in the
-ad account currency.
+Hooks httpx.AsyncClient.send, which every Graph API and Pipeboard request of
+meta-ads-mcp passes through (asserted by tests/test_upstream_invariants.py), and
+rejects:
+- writes that exceed budget limits or would delete or archive objects,
+- ad destinations outside the allowed domains (if configured, see url_policy),
+- any request to Pipeboard servers unless explicitly allowed.
+Blocked calls never leave the machine; Claude receives a Graph-style error
+explaining the rule. Budget limits apply per request/object, in the ad account
+currency.
 """
 import json
 import logging
 from dataclasses import dataclass
-from urllib.parse import parse_qsl
+from urllib.parse import parse_qsl, urlsplit
 
 import httpx
 
+import url_policy
+
 ENV_MAX_DAILY = "META_GUARD_MAX_DAILY_BUDGET"
 ENV_MAX_LIFETIME = "META_GUARD_MAX_LIFETIME_BUDGET"
+ENV_ALLOW_PIPEBOARD = "META_GUARD_ALLOW_PIPEBOARD"
+ENV_PIPEBOARD_BASE_URL = "PIPEBOARD_API_BASE_URL"
 CENTS_PER_UNIT = 100
+TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
+PIPEBOARD_HOSTS = frozenset({"mcp.pipeboard.co", "meta-ads.mcp.pipeboard.co"})
 
 
 @dataclass(frozen=True)
-class Limits:
+class Policy:
     max_daily_cents: int
     max_lifetime_cents: int
     max_budget_multiplier: float = 2.0
+    blocked_hosts: frozenset = PIPEBOARD_HOSTS
+    allowed_url_domains: frozenset = frozenset()
 
 
-DEFAULT_LIMITS = Limits(max_daily_cents=250 * CENTS_PER_UNIT, max_lifetime_cents=5_000 * CENTS_PER_UNIT)
+DEFAULT_POLICY = Policy(max_daily_cents=250 * CENTS_PER_UNIT, max_lifetime_cents=5_000 * CENTS_PER_UNIT)
 BLOCKED_STATUSES = frozenset({"DELETED", "ARCHIVED"})
 
 GRAPH_HOSTS = frozenset({"graph.facebook.com"})
@@ -37,7 +49,7 @@ FORM_CONTENT_TYPE = "application/x-www-form-urlencoded"
 
 logger = logging.getLogger("meta-ads-mcp.write-guard")
 _original_send = None
-_active_limits = DEFAULT_LIMITS
+_active_policy = DEFAULT_POLICY
 
 
 def _limit_cents(environ, name, default_cents):
@@ -53,10 +65,20 @@ def _limit_cents(environ, name, default_cents):
     return round(amount * CENTS_PER_UNIT)
 
 
-def limits_from_env(environ):
-    return Limits(
-        max_daily_cents=_limit_cents(environ, ENV_MAX_DAILY, DEFAULT_LIMITS.max_daily_cents),
-        max_lifetime_cents=_limit_cents(environ, ENV_MAX_LIFETIME, DEFAULT_LIMITS.max_lifetime_cents),
+def _blocked_hosts(environ):
+    if environ.get(ENV_ALLOW_PIPEBOARD, "").strip().lower() in TRUE_VALUES:
+        return frozenset()
+    custom_host = urlsplit(environ.get(ENV_PIPEBOARD_BASE_URL, "")).hostname
+    return PIPEBOARD_HOSTS | ({custom_host.lower()} if custom_host else set())
+
+
+def policy_from_env(environ):
+    """Builds the policy from environment variables; raises ValueError on invalid values."""
+    return Policy(
+        max_daily_cents=_limit_cents(environ, ENV_MAX_DAILY, DEFAULT_POLICY.max_daily_cents),
+        max_lifetime_cents=_limit_cents(environ, ENV_MAX_LIFETIME, DEFAULT_POLICY.max_lifetime_cents),
+        blocked_hosts=_blocked_hosts(environ),
+        allowed_url_domains=url_policy.parse_domains(environ.get(url_policy.ENV_ALLOWED_DOMAINS)),
     )
 
 
@@ -96,24 +118,28 @@ def _check_status(fields):
     return None
 
 
-def _check_budget_schedule(fields, limits):
+def _check_budget_schedule(fields, policy):
     value_type = str(fields.get("budget_value_type", "")).upper()
     if "budget_value" not in fields or not value_type:
         return None
     if value_type == "ABSOLUTE":
-        return _check_amount(fields, ("budget_value",), limits.max_daily_cents)
+        return _check_amount(fields, ("budget_value",), policy.max_daily_cents)
     try:
         multiplier = float(fields["budget_value"])
     except ValueError:
         return f"budget_value='{fields['budget_value']}' is not a valid number."
-    if multiplier > limits.max_budget_multiplier:
-        return f"Budget multiplier {multiplier} exceeds the limit of {limits.max_budget_multiplier}."
+    if multiplier > policy.max_budget_multiplier:
+        return f"Budget multiplier {multiplier} exceeds the limit of {policy.max_budget_multiplier}."
     return None
 
 
-def check_request(request, limits=DEFAULT_LIMITS):
+def check_request(request, policy=DEFAULT_POLICY):
     """Returns a reason string if the request must be blocked, else None."""
-    if request.url.host not in GRAPH_HOSTS:
+    host = (request.url.host or "").lower()
+    if host in policy.blocked_hosts:
+        return (f"Requests to Pipeboard servers ({host}) are blocked to keep campaign data local. "
+                f"Set {ENV_ALLOW_PIPEBOARD}=1 to allow them.")
+    if host not in GRAPH_HOSTS:
         return None
     if request.method == "DELETE":
         return "Deleting via the API is blocked. Please do this in Meta Ads Manager."
@@ -124,9 +150,10 @@ def check_request(request, limits=DEFAULT_LIMITS):
         return "Unknown request format for a write call - blocked for safety."
     return (
         _check_status(fields)
-        or _check_amount(fields, DAILY_FIELDS, limits.max_daily_cents)
-        or _check_amount(fields, LIFETIME_FIELDS, limits.max_lifetime_cents)
-        or _check_budget_schedule(fields, limits)
+        or _check_amount(fields, DAILY_FIELDS, policy.max_daily_cents)
+        or _check_amount(fields, LIFETIME_FIELDS, policy.max_lifetime_cents)
+        or _check_budget_schedule(fields, policy)
+        or url_policy.check_destinations(fields, policy.allowed_url_domains)
     )
 
 
@@ -136,24 +163,24 @@ def _blocked_response(request, reason):
 
 
 async def _guarded_send(self, request, **kwargs):
-    reason = check_request(request, _active_limits)
+    reason = check_request(request, _active_policy)
     if reason:
-        logger.warning("Blocked %s %s: %s", request.method, request.url.path, reason)
+        logger.warning("Blocked %s %s%s: %s", request.method, request.url.host, request.url.path, reason)
         return _blocked_response(request, reason)
     return await _original_send(self, request, **kwargs)
 
 
-def install(limits=DEFAULT_LIMITS):
-    global _original_send, _active_limits
-    _active_limits = limits
+def install(policy=DEFAULT_POLICY):
+    global _original_send, _active_policy
+    _active_policy = policy
     if _original_send is None:
         _original_send = httpx.AsyncClient.send
         httpx.AsyncClient.send = _guarded_send
 
 
 def uninstall():
-    global _original_send, _active_limits
+    global _original_send, _active_policy
     if _original_send is not None:
         httpx.AsyncClient.send = _original_send
         _original_send = None
-    _active_limits = DEFAULT_LIMITS
+    _active_policy = DEFAULT_POLICY

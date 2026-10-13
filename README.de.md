@@ -21,6 +21,7 @@ Der Starter verändert `meta-ads-mcp` nicht. Er installiert das Originalpaket vo
 - [Manuelle Einrichtung](#manuelle-einrichtung)
 - [Konfiguration](#konfiguration)
 - [Schreibschutz](#schreibschutz)
+- [Tool-Hinweise](#tool-hinweise)
 - [Token-Prüfung](#token-prüfung)
 - [Aktualisieren](#aktualisieren)
 - [Fehlerbehebung](#fehlerbehebung)
@@ -46,6 +47,9 @@ In der üblichen `meta-ads-mcp`-Einrichtung stehen `META_APP_SECRET` und `META_A
 - **Keine Zugangsdaten im Klartext**: App-Secret und Token liegen im Windows-Anmeldeinformationsspeicher (DPAPI, an dein Windows-Konto gebunden). In der Claude-Desktop-Konfiguration steht nur die App-ID, und die ist nicht geheim.
 - **Abgesichertes Logging**: Tokens und `appsecret_proof` werden geschwärzt, Debug-Ausgaben unterdrückt. Das Log ist UTF-8-kodiert und rotiert (höchstens 3 × 5 MB).
 - **Schreibschutz**: blockiert `DELETE`, die Status `DELETED`/`ARCHIVED` und Budgets über einstellbaren Grenzen, bevor die Anfrage deinen Rechner verlässt. Claude bekommt eine verständliche Fehlermeldung.
+- **Erlaubte Ziel-Domains**: beschränkt Anzeigen-Links optional auf deine eigenen Domains. Eine Prompt-Injection kann deine Anzeigen dann nicht auf fremde Seiten umleiten.
+- **Keine Daten an Pipeboard**: Anfragen an die Server von Pipeboard werden blockiert, solange du sie nicht ausdrücklich erlaubst.
+- **Tool-Hinweise**: Alle 41 Upstream-Tools sind als lesend, hinzufügend oder verändernd markiert (MCP `readOnlyHint`/`destructiveHint`). Tools mit großen Ergebnissen geben `anthropic/maxResultSizeChars` für Claude Code an.
 - **Token-Prüfung**: zeigt Gültigkeit, Ablaufdatum und Rechte, ohne den Token je auszugeben, und warnt vor baldigem Ablauf und unnötigen Rechten. Lässt sich als geplante Aufgabe einrichten.
 - **Einrichtungsassistent**: installiert alles, speichert die Zugangsdaten mit sichtbarer Rückmeldung (Länge und letzte 4 Zeichen), prüft den Token und schreibt nach Rückfrage den Eintrag für Claude Desktop, mit Sicherung.
 - **Zweisprachig**: Assistent und Hilfsskripte sprechen Deutsch und Englisch.
@@ -154,6 +158,8 @@ Danach diesen Eintrag unter `mcpServers` in `%APPDATA%\Claude\claude_desktop_con
 | `META_APP_ID` | Claude-Desktop-Eintrag | – (Pflicht) | ID deiner Meta-App (nicht geheim) |
 | `META_GUARD_MAX_DAILY_BUDGET` | Claude-Desktop-Eintrag | `250` | Maximales Tagesbudget pro Objekt, in Kontowährung |
 | `META_GUARD_MAX_LIFETIME_BUDGET` | Claude-Desktop-Eintrag | `5000` | Maximales Laufzeitbudget bzw. Ausgabenlimit pro Objekt, in Kontowährung |
+| `META_GUARD_ALLOWED_URL_DOMAINS` | Claude-Desktop-Eintrag | leer (Regel aus) | Kommagetrennte Domains, auf die Anzeigen-Links zeigen dürfen, z.B. `example.com,shop.example.org` (inkl. Subdomains) |
+| `META_GUARD_ALLOW_PIPEBOARD` | Claude-Desktop-Eintrag | aus | `1` erlaubt Anfragen an die Server von Pipeboard |
 | `META_MCP_LANG` | Umgebung | Systemsprache | `de` oder `en` für Assistent und Hilfsskripte |
 
 Setzt der Starter automatisch: `META_ADS_DISABLE_CALLBACK_SERVER=1` und `META_ADS_DISABLE_LOGIN_LINK=1`.
@@ -172,10 +178,27 @@ Logdatei: `%APPDATA%\meta-ads-mcp\meta_ads_debug.log` (+ `.1` bis `.3`).
 | Laufzeitbudget | `lifetime_budget`, `spend_cap`, `lifetime_spend_cap`, `lifetime_min_spend_target` über `META_GUARD_MAX_LIFETIME_BUDGET` |
 | Budget-Zeitpläne | `ABSOLUTE`-Erhöhungen über dem Tageslimit, `MULTIPLIER` über 2 |
 | Unbekanntes Format | Schreibanfragen, deren Inhalt nicht formularkodiert ist (im Zweifel blockiert) |
+| Ziel-URLs | nur wenn `META_GUARD_ALLOWED_URL_DOMAINS` gesetzt ist: ein `link`, `website_url`, `template_url` oder `deeplink_url` (auch verschachtelt in `object_story_spec`/`asset_feed_spec`), das nicht `https` ist, außerhalb der erlaubten Domains liegt, auf eine IP-Adresse zeigt oder Zugangsdaten in der URL enthält. `display_url` und `url_tags` werden nicht geprüft. Nicht lesbare Angaben werden blockiert. |
+| Pipeboard | jede Anfrage an `mcp.pipeboard.co`, `meta-ads.mcp.pipeboard.co` oder den Host aus `PIPEBOARD_API_BASE_URL`, außer bei `META_GUARD_ALLOW_PIPEBOARD=1` |
 
 Ein blockierter Aufruf verlässt deinen Rechner nie. Claude bekommt eine Fehlermeldung im Graph-Format (`Blocked by local write guard: …`), und der Vorgang wird als Warnung protokolliert.
 
 **Grenzen:** Der Schreibschutz prüft einzelne Anfragen. Kontoweite Summen setzt er nicht durch (viele Kampagnen jeweils am Limit sind möglich), und `bid_amount`/`bid_cap` begrenzt er nicht. Kombiniere ihn mit „Immer fragen“ in Claude Desktop und am besten mit einem Ausgabenlimit für das Werbekonto bei Meta.
+
+Die Pipeboard-Regel ist eine zusätzliche Absicherung: Die optionalen `duplicate_*`-Tools von `meta-ads-mcp` schicken Kampagnendaten an die Server von Pipeboard. Mit Claude Desktop (stdio) brechen sie derzeit vorher ab, weil sie einen Pipeboard-Token in einem HTTP-Header erwarten. Die Regel stellt sicher, dass die Daten auch dann lokal bleiben, wenn sich das ändert.
+
+## Tool-Hinweise
+
+`meta-ads-mcp` teilt Clients nicht mit, welche Tools nur lesen. Der Starter ergänzt deshalb bei jedem Tool [MCP-Tool-Hinweise](https://modelcontextprotocol.io/specification/2025-06-18/server/tools) (`tool_policy.py`):
+
+| Kategorie | Tools | Hinweise |
+|---|---|---|
+| Lesen | `get_*`, `search_*`, `estimate_audience_size`, `compute_image_crops`, `generate_report` | `readOnlyHint` |
+| Hinzufügen | `create_ad`, `create_adset`, `create_campaign`, `create_ad_creative`, `upload_ad_image`, `duplicate_*` | nicht nur lesend, nicht zerstörerisch |
+| Verändern | `update_*`, `create_budget_schedule` | `destructiveHint` |
+| Lokale Datei | `save_ad_image_locally` | nicht nur lesend, ohne Netzwerk |
+
+Ein Test schlägt fehl, sobald ein Upstream-Update ein Tool mitbringt, das nicht eingestuft ist. Zur Laufzeit gelten unbekannte Tools als verändernd. `get_insights`, `get_ads`, `get_adsets` und `get_campaigns` geben zusätzlich `anthropic/maxResultSizeChars` an (500k/250k/150k/100k). Damit behält Claude Code große Ergebnisse im Gespräch. Ob Claude Desktop die Hinweise oder diesen Wert nutzt, ist nicht dokumentiert. Verlässlich bleibt die Einstellung „Immer fragen“.
 
 ## Token-Prüfung
 
@@ -217,7 +240,7 @@ Prüfe das Ergebnis mit [`pip-audit`](https://pypi.org/project/pip-audit/) (`pip
 
 ## Sicherheitsmodell und Grenzen
 
-- **Schützt vor:** Zugangsdaten in Konfigurationsdateien, Backups und Support-Uploads; Tokens in Logdateien; versehentlichen oder eingeschleusten zerstörerischen Schreibaufrufen; unnötigen lokalen Netzwerkdiensten.
+- **Schützt vor:** Zugangsdaten in Konfigurationsdateien, Backups und Support-Uploads; Tokens in Logdateien; versehentlichen oder eingeschleusten zerstörerischen Schreibaufrufen; Anzeigen-Links, die auf fremde Domains umgeleitet werden (mit erlaubten Ziel-Domains); Kampagnendaten, die an Server Dritter gehen; unnötigen lokalen Netzwerkdiensten.
 - **Schützt nicht vor:** Schadsoftware, die unter deinem Windows-Konto läuft. Sie kann den Anmeldeinformationsspeicher genauso lesen wie der Starter. Auch nicht vor Änderungen, die du selbst bestätigst, und nicht vor allem, was die Meta-Rechte des Tokens außerhalb von `meta-ads-mcp` erlauben.
 - Der Schreibschutz funktioniert über eine Hülle um `httpx`. Nutzt eine künftige Upstream-Version einen anderen HTTP-Client, greift er nicht mehr. Dafür gibt es die festen Versionen und den Selbsttest.
 - Nur für Windows.
@@ -235,12 +258,15 @@ venv\Scripts\python.exe -m tools.render_screenshots   # docs/screenshots/*.svg n
 |---|---|
 | `launch_secure.py` | Einstiegspunkt für Claude Desktop |
 | `secure_logging.py` | Schwärzung, Log-Stufe, Rotation |
-| `write_guard.py` | Regeln für Schreibaufrufe |
+| `write_guard.py` | Regeln für Schreibaufrufe und gesperrte Hosts |
+| `url_policy.py` | Erlaubte Ziel-Domains für Anzeigen |
+| `tool_policy.py` | Tool-Hinweise und Größenangaben für Ergebnisse |
 | `store_secrets.py` | Zugangsdaten speichern (verdeckte Eingabe, `--status`) |
 | `check_token.py` | Gültigkeit, Ablauf und Rechte des Tokens |
 | `setup_wizard.py` | Einrichtungsassistent (nur Standardbibliothek) |
 | `i18n.py` | Deutsche und englische Meldungen |
 | `tools/` | Screenshot-Erzeugung und Test-Attrappen |
+| `tests/test_upstream_invariants.py` | Schlägt fehl, wenn ein Upstream-Update nicht eingestufte Tools oder andere HTTP-Clients als `httpx` mitbringt |
 
 ## Lizenz
 
