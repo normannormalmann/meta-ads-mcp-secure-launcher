@@ -1,0 +1,249 @@
+# meta-ads-mcp secure launcher
+
+**English** · [Deutsch](README.de.md)
+
+A hardened launcher for [`meta-ads-mcp`](https://github.com/pipeboard-co/meta-ads-mcp) on Windows. It lets Claude Desktop work with your Meta (Facebook/Instagram) ad accounts **without plain-text credentials in config files, without tokens in log files, and with a local safety net for write access**.
+
+The launcher does not modify `meta-ads-mcp`. It installs the upstream package from PyPI, starts it through a small wrapper and adds the protections described below. A bilingual setup wizard (English/German) takes you through the setup step by step.
+
+> [!NOTE]
+> This is an independent community project. It is not affiliated with Meta, Pipeboard or Anthropic.
+
+---
+
+## Contents
+
+- [Why?](#why)
+- [Features](#features)
+- [How it works](#how-it-works)
+- [Requirements](#requirements)
+- [Quick start with the setup wizard](#quick-start-with-the-setup-wizard)
+- [Manual setup](#manual-setup)
+- [Configuration reference](#configuration-reference)
+- [Write guard](#write-guard)
+- [Token check](#token-check)
+- [Updating](#updating)
+- [Troubleshooting](#troubleshooting)
+- [Security model and limitations](#security-model-and-limitations)
+- [Development](#development)
+- [License](#license)
+
+## Why?
+
+The typical `meta-ads-mcp` setup puts `META_APP_SECRET` and `META_ACCESS_TOKEN` into `claude_desktop_config.json` in plain text. An audit of such a setup found more problems:
+
+| Problem | Risk | Fixed by |
+|---|---|---|
+| App secret and access token in plain text in `claude_desktop_config.json` | Anyone who gets the file (backup, sync, support case, malware) controls your ad accounts | Credentials are stored in the **Windows Credential Manager** |
+| Older `meta-ads-mcp` versions (e.g. 1.0.97) wrote every Graph API URL **including `access_token=…`** into a debug log that is never rotated (11 MB in our case) | Token leaks via the log file | Secret masking, INFO level, **rotation 3 × 5 MB** (upstream fixed the leak itself in later versions, see GHSA-r3r9-3mrh-x966; the masking stays as defence in depth) |
+| Full write access to campaigns, ad sets, ads and budgets, without limits | A misunderstood instruction or a prompt injection can raise budgets or delete campaigns | Local **write guard** that blocks deleting/archiving and budgets above your limits |
+| A local OAuth callback server and a login-link tool are active, although token auth is used | Needless attack surface | Disabled by the launcher |
+| Tokens with far more permissions than needed (posting on Instagram, reading messages, …) | Much larger blast radius if the token leaks | `check_token.py` reports unneeded permissions and the expiry date |
+| Unpinned dependencies with known vulnerabilities (e.g. SSRF in `upload_ad_image` before 1.0.115, several in Pillow) | Exploitable via crafted images/URLs | `requirements.lock` with audited versions and a self-test |
+
+## Features
+
+- **No plain-text credentials** – app secret and token live in the Windows Credential Manager (DPAPI, bound to your Windows account). The Claude Desktop configuration only contains the non-secret App ID.
+- **Hardened logging** – tokens and `appsecret_proof` are masked, debug output is suppressed, the log is UTF-8 and rotated (max. 3 × 5 MB).
+- **Write guard** – blocks `DELETE`, the statuses `DELETED`/`ARCHIVED`, and budgets above configurable limits before the request leaves your machine. Claude receives a clear error message.
+- **Token check** – shows validity, expiry and permissions without ever printing the token, and warns about upcoming expiry and unneeded permissions. Suitable as a scheduled task.
+- **Setup wizard** – installs everything, stores the credentials with visible feedback (length and last 4 characters), checks the token and writes the Claude Desktop entry after asking, with a backup.
+- **Bilingual** – the wizard and the helper scripts speak English and German.
+- **Tested** – unit tests for every module, including one that verifies the launcher's log hardening works with the pinned upstream version.
+
+## How it works
+
+```mermaid
+flowchart LR
+    CD[Claude Desktop] -- stdio --> L[launch_secure.py]
+    WCM[(Windows<br/>Credential Manager)] -- app secret + token --> L
+    L --> SL[secure_logging<br/>masking + rotation]
+    L --> WG[write_guard<br/>hooks httpx]
+    L --> M[meta-ads-mcp<br/>from PyPI]
+    M -- every Graph API call --> WG
+    WG -- allowed --> G[graph.facebook.com]
+    WG -. blocked .-> M
+```
+
+1. `launch_secure.py` configures logging **before** the package is imported, so the package cannot install its own unbounded handler.
+2. It installs the write guard by wrapping `httpx.AsyncClient.send`, which every Graph API request of `meta-ads-mcp` passes through.
+3. It reads the credentials from the Windows Credential Manager into the process environment, disables the OAuth callback server and the login-link tool, and starts `meta-ads-mcp`.
+
+## Requirements
+
+- **Windows 10/11** (the launcher uses the Windows Credential Manager)
+- **Python 3.10 or newer** – [python.org](https://www.python.org/downloads/windows/)
+- **Claude Desktop** – [claude.ai/download](https://claude.ai/download)
+- A **Meta app** with the Marketing API and an **access token** for it, preferably from a system user
+
+## Quick start with the setup wizard
+
+```powershell
+git clone https://github.com/normannormalmann/meta-ads-mcp-secure-launcher.git
+cd meta-ads-mcp-secure-launcher
+python setup_wizard.py
+```
+
+The wizard asks for the language first (`--lang en` or `--lang de` skips the question). Every change needs your confirmation. The screenshots below come from a simulated run with placeholder data (`tools/render_screenshots.py`).
+
+### 1. Prerequisites and installation
+
+The wizard checks Windows, the Python version and `requirements.lock`, creates a virtual environment in `venv\`, installs the pinned dependencies and runs the self-test.
+
+![Setup wizard: prerequisites and installation](docs/screenshots/01-install-en.svg)
+
+### 2. Meta app, credentials and token check
+
+You enter the App ID (not secret). App secret and token are entered **hidden**. You still get feedback: number of characters and the last 4 characters, plus a format check. Then the wizard asks Meta whether the token is valid, when it expires and which permissions it has.
+
+![Setup wizard: credentials and token check](docs/screenshots/02-credentials-en.svg)
+
+**Creating the token** (Meta Business Settings):
+
+1. `business.facebook.com/settings` → *Users* → *System users* → *Add*
+2. Assign only the ad accounts (and pages) that Claude should manage
+3. *Generate token* for your app with `ads_management` and `ads_read`. Add `business_management`, `pages_show_list`, `pages_read_engagement`, `pages_manage_ads` and `instagram_basic` only if you create ads with pages or Instagram accounts.
+4. Copy the token, and the app secret from the [app dashboard](https://developers.facebook.com/apps) (*App settings* → *Basic*)
+
+> [!TIP]
+> In the app dashboard under *App settings → Advanced*, enable **"Require App Secret"**. `meta-ads-mcp` sends `appsecret_proof` with every call, so a token stolen without the app secret becomes useless.
+
+### 3. Write guard limits and Claude Desktop
+
+You set the maximum daily and lifetime budget. The wizard shows the exact entry it will add, offers to remove old entries with plain-text credentials, creates a backup and writes the configuration.
+
+![Setup wizard: write guard limits and Claude Desktop](docs/screenshots/03-claude-en.svg)
+
+**After the wizard:**
+
+1. Quit Claude Desktop completely (tray icon → *Quit*) and start it again.
+2. In Claude Desktop under *Settings → Connectors → meta-ads*, set the `create_*` and `update_*` tools as well as `upload_ad_image` and `create_budget_schedule` to **"Always ask"**.
+3. If the wizard reported plain-text credentials in the backup: delete the backup once everything works, and **rotate the old token and app secret**.
+
+## Manual setup
+
+```powershell
+python -m venv venv
+venv\Scripts\python.exe -m pip install -r requirements.lock
+venv\Scripts\python.exe -m pytest -q          # self-test
+venv\Scripts\python.exe store_secrets.py      # hidden input, stored in Windows Credential Manager
+$env:META_APP_ID = "123456789012345"
+venv\Scripts\python.exe check_token.py
+```
+
+Then add this entry under `mcpServers` in `%APPDATA%\Claude\claude_desktop_config.json`. For the Microsoft Store version of Claude Desktop the file is under `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude\`.
+
+```json
+"meta-ads": {
+  "command": "C:\\path\\to\\meta-ads-mcp-secure-launcher\\venv\\Scripts\\python.exe",
+  "args": ["C:\\path\\to\\meta-ads-mcp-secure-launcher\\launch_secure.py"],
+  "env": {
+    "META_APP_ID": "123456789012345",
+    "META_GUARD_MAX_DAILY_BUDGET": "250",
+    "META_GUARD_MAX_LIFETIME_BUDGET": "5000"
+  }
+}
+```
+
+Do **not** put `META_APP_SECRET` or `META_ACCESS_TOKEN` into this file.
+
+## Configuration reference
+
+| Variable | Where | Default | Meaning |
+|---|---|---|---|
+| `META_APP_ID` | Claude Desktop entry | – (required) | ID of your Meta app (not secret) |
+| `META_GUARD_MAX_DAILY_BUDGET` | Claude Desktop entry | `250` | Maximum daily budget per object, in account currency |
+| `META_GUARD_MAX_LIFETIME_BUDGET` | Claude Desktop entry | `5000` | Maximum lifetime budget / spend cap per object, in account currency |
+| `META_MCP_LANG` | environment | system language | `de` or `en` for the wizard and the helper scripts |
+
+Set automatically by the launcher: `META_ADS_DISABLE_CALLBACK_SERVER=1` and `META_ADS_DISABLE_LOGIN_LINK=1`.
+
+The credentials are stored as *generic credentials* named `meta-ads-mcp/app_secret` and `meta-ads-mcp/access_token`. You can see them under *Control Panel → Credential Manager → Windows Credentials*. `store_secrets.py --status` shows whether they exist, without showing the values.
+
+Log file: `%APPDATA%\meta-ads-mcp\meta_ads_debug.log` (+ `.1` to `.3`).
+
+## Write guard
+
+| Rule | Blocked when |
+|---|---|
+| Delete | HTTP `DELETE` to the Graph API |
+| Status | `status` / `configured_status` = `DELETED` or `ARCHIVED` (pausing and activating are allowed) |
+| Daily budget | `daily_budget`, `daily_spend_cap`, `daily_min_spend_target` above `META_GUARD_MAX_DAILY_BUDGET` |
+| Lifetime budget | `lifetime_budget`, `spend_cap`, `lifetime_spend_cap`, `lifetime_min_spend_target` above `META_GUARD_MAX_LIFETIME_BUDGET` |
+| Budget schedules | `ABSOLUTE` increases above the daily limit, `MULTIPLIER` above 2 |
+| Unknown format | write requests whose body is not form-encoded (fail-closed) |
+
+A blocked call never leaves your machine. Claude receives a Graph-style error (`Blocked by local write guard: …`), and the event is logged as a warning.
+
+**Limits:** the guard checks single requests. It does not enforce account-wide totals (many campaigns at the limit are still possible), and it does not limit `bid_amount`/`bid_cap`. Combine it with *"Always ask"* in Claude Desktop and, ideally, a spending limit on the ad account in Meta.
+
+## Token check
+
+```powershell
+venv\Scripts\python.exe check_token.py --app-id 123456789012345   # or set META_APP_ID
+```
+
+The script prints validity, type, expiry, data-access expiry and permissions, never the token itself. Exit code `0` = OK, `1` = warnings (expires in under 14 days, invalid, unneeded permissions), `2` = error.
+
+Weekly check as a scheduled task. The result appears as *Last Run Result* in the Task Scheduler.
+
+```powershell
+schtasks /Create /SC WEEKLY /D MON /ST 09:00 /TN "meta-ads token check" `
+  /TR "\"C:\path\to\venv\Scripts\python.exe\" \"C:\path\to\check_token.py\" --app-id 123456789012345"
+```
+
+## Updating
+
+`requirements.lock` pins a tested combination (currently `meta-ads-mcp` 1.0.128). To update:
+
+```powershell
+venv\Scripts\python.exe -m pip install --upgrade meta-ads-mcp
+venv\Scripts\python.exe -m pytest -q
+venv\Scripts\python.exe -m pip freeze --exclude-editable > requirements.lock
+```
+
+Check the result with [`pip-audit`](https://pypi.org/project/pip-audit/) (`pip-audit -r requirements.lock`) and start the server once. The launcher relies on upstream internals (logger name, `httpx` usage). If the self-test fails after an update, go back with `pip install -r requirements.lock` from the previous commit.
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| Claude Desktop shows the meta-ads server as failed | Run `venv\Scripts\python.exe launch_secure.py` in a terminal. Missing credentials or an invalid limit are reported on stderr. |
+| `credentials missing in Windows Credential Manager` | Run `venv\Scripts\python.exe store_secrets.py` |
+| `Blocked by local write guard` | Intended. Make the change in Meta Ads Manager or raise the limit in the Claude Desktop entry. |
+| The log file cannot be deleted | An old server instance is still running. Quit Claude Desktop via the tray icon. |
+| Token check: `Unneeded permissions` | Issue a new system user token with fewer permissions and run `store_secrets.py` again |
+| Nothing visible while pasting | Normal for hidden input. After *Enter* you see the number of characters and the last 4 characters. |
+
+## Security model and limitations
+
+- **Protects against:** credentials in config files, backups and support uploads; tokens in log files; accidental or injected destructive write calls; unnecessary local network services.
+- **Does not protect against:** malware running under your Windows account. It can read the Credential Manager just like the launcher. It also does not protect against changes you approve yourself, or against everything the Meta permissions of the token allow outside of `meta-ads-mcp`.
+- The write guard works by wrapping `httpx`. A future upstream version that uses another HTTP client would bypass it. Pinned versions and the self-test exist for that reason.
+- Windows only.
+
+Please report vulnerabilities privately, see [SECURITY.md](SECURITY.md).
+
+## Development
+
+```powershell
+venv\Scripts\python.exe -m pytest -q
+venv\Scripts\python.exe -m tools.render_screenshots   # regenerate docs/screenshots/*.svg
+```
+
+| File | Purpose |
+|---|---|
+| `launch_secure.py` | Entry point for Claude Desktop |
+| `secure_logging.py` | Masking, log level, rotation |
+| `write_guard.py` | Rules for write calls |
+| `store_secrets.py` | Store credentials (hidden input, `--status`) |
+| `check_token.py` | Token validity, expiry, permissions |
+| `setup_wizard.py` | Setup wizard (standard library only) |
+| `i18n.py` | English/German messages |
+| `tools/` | Screenshot rendering and test doubles |
+
+## License
+
+[MIT](LICENSE) for the code in this repository.
+
+`meta-ads-mcp` itself is **not** part of this repository. It is installed from PyPI and licensed by Pipeboard under the [Business Source License 1.1](https://github.com/pipeboard-co/meta-ads-mcp). This repository contains no code from `meta-ads-mcp`. The launcher only installs and starts it. When you install `meta-ads-mcp`, you accept its license yourself. Its *Additional Use Grant* permits production use, as long as you do not offer it to third parties as a hosted or embedded service that competes with the licensor's commercial offerings.
