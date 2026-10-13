@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="851" height="834" viewBox="0 0 851 834" role="img" aria-label="python setup_wizard.py">
-<rect width="851" height="834" rx="10" fill="#0d1117" stroke="#30363d"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="851" height="874" viewBox="0 0 851 874" role="img" aria-label="python setup_wizard.py">
+<rect width="851" height="874" rx="10" fill="#0d1117" stroke="#30363d"/>
 <path d="M0 10a10 10 0 0 1 10-10h831a10 10 0 0 1 10 10v24H0z" fill="#161b22"/>
 <circle cx="20" cy="17.0" r="6" fill="#ff5f57"/>
 <circle cx="40" cy="17.0" r="6" fill="#febc2e"/>
@@ -27,22 +27,24 @@
 <tspan x="20" y="429"><tspan fill="#a5d6ff">  "env": {</tspan></tspan>
 <tspan x="20" y="449"><tspan fill="#a5d6ff">    "META_APP_ID": "123456789012345",</tspan></tspan>
 <tspan x="20" y="469"><tspan fill="#a5d6ff">    "META_DEFAULT_ACCOUNT_ID": "act_1234567890",</tspan></tspan>
-<tspan x="20" y="489"><tspan fill="#a5d6ff">    "META_GUARD_MAX_DAILY_BUDGET": "250",</tspan></tspan>
-<tspan x="20" y="509"><tspan fill="#a5d6ff">    "META_GUARD_MAX_LIFETIME_BUDGET": "5000",</tspan></tspan>
-<tspan x="20" y="529"><tspan fill="#a5d6ff">    "META_GUARD_ALLOWED_URL_DOMAINS": "example.com"</tspan></tspan>
-<tspan x="20" y="549"><tspan fill="#a5d6ff">  }</tspan></tspan>
-<tspan x="20" y="569"><tspan fill="#a5d6ff">}</tspan></tspan>
-<tspan x="20" y="589"><tspan fill="#79c0ff">[?]  Vorhandene Einträge mit Meta-Zugangsdaten im Klartext gefunden: meta-ads-mcp.</tspan></tspan>
-<tspan x="20" y="609"><tspan fill="#79c0ff">     Entfernen (empfohlen)? [J/n] </tspan><tspan fill="#ffffff" font-weight="700"></tspan></tspan>
-<tspan x="20" y="629"><tspan fill="#79c0ff">[?]  Eintrag jetzt schreiben? Vorher wird eine Sicherung angelegt. [J/n] </tspan><tspan fill="#ffffff" font-weight="700"></tspan></tspan>
-<tspan x="20" y="649"><tspan fill="#3fb950">[OK] Claude-Desktop-Konfiguration aktualisiert.</tspan></tspan>
-<tspan x="20" y="669"><tspan fill="#c9d1d9">Sicherung: C:\Users\you\AppData\Roaming\Claude\claude_desktop_config.json.bak-20261013-093000</tspan></tspan>
-<tspan x="20" y="689"><tspan fill="#d29922">[!]  Die Sicherung enthält noch Zugangsdaten im Klartext. Lösche sie, sobald alles</tspan></tspan>
-<tspan x="20" y="709"><tspan fill="#c9d1d9">     funktioniert, und erneuere den alten Token und das App-Secret.</tspan></tspan>
-<tspan x="20" y="729"><tspan fill="#c9d1d9"></tspan></tspan>
-<tspan x="20" y="749"><tspan fill="#c9d1d9">Fertig. Nächste Schritte:</tspan></tspan>
-<tspan x="20" y="769"><tspan fill="#c9d1d9">  1. Claude Desktop komplett beenden (Tray-Symbol -&gt; Beenden) und neu starten</tspan></tspan>
-<tspan x="20" y="789"><tspan fill="#c9d1d9">  2. Einstellungen -&gt; Connectors -&gt; meta-ads: create_*/update_*-Tools auf 'Immer fragen' stellen</tspan></tspan>
-<tspan x="20" y="809"><tspan fill="#c9d1d9">  3. Token regelmäßig prüfen: venv\Scripts\python.exe check_token.py</tspan></tspan>
+<tspan x="20" y="489"><tspan fill="#a5d6ff">    "META_ENABLE_INSTAGRAM_INSIGHTS": "1",</tspan></tspan>
+<tspan x="20" y="509"><tspan fill="#a5d6ff">    "META_DEFAULT_IG_USER_ID": "17841400000000000",</tspan></tspan>
+<tspan x="20" y="529"><tspan fill="#a5d6ff">    "META_GUARD_MAX_DAILY_BUDGET": "250",</tspan></tspan>
+<tspan x="20" y="549"><tspan fill="#a5d6ff">    "META_GUARD_MAX_LIFETIME_BUDGET": "5000",</tspan></tspan>
+<tspan x="20" y="569"><tspan fill="#a5d6ff">    "META_GUARD_ALLOWED_URL_DOMAINS": "example.com"</tspan></tspan>
+<tspan x="20" y="589"><tspan fill="#a5d6ff">  }</tspan></tspan>
+<tspan x="20" y="609"><tspan fill="#a5d6ff">}</tspan></tspan>
+<tspan x="20" y="629"><tspan fill="#79c0ff">[?]  Vorhandene Einträge mit Meta-Zugangsdaten im Klartext gefunden: meta-ads-mcp.</tspan></tspan>
+<tspan x="20" y="649"><tspan fill="#79c0ff">     Entfernen (empfohlen)? [J/n] </tspan><tspan fill="#ffffff" font-weight="700"></tspan></tspan>
+<tspan x="20" y="669"><tspan fill="#79c0ff">[?]  Eintrag jetzt schreiben? Vorher wird eine Sicherung angelegt. [J/n] </tspan><tspan fill="#ffffff" font-weight="700"></tspan></tspan>
+<tspan x="20" y="689"><tspan fill="#3fb950">[OK] Claude-Desktop-Konfiguration aktualisiert.</tspan></tspan>
+<tspan x="20" y="709"><tspan fill="#c9d1d9">Sicherung: C:\Users\you\AppData\Roaming\Claude\claude_desktop_config.json.bak-20261013-093000</tspan></tspan>
+<tspan x="20" y="729"><tspan fill="#d29922">[!]  Die Sicherung enthält noch Zugangsdaten im Klartext. Lösche sie, sobald alles</tspan></tspan>
+<tspan x="20" y="749"><tspan fill="#c9d1d9">     funktioniert, und erneuere den alten Token und das App-Secret.</tspan></tspan>
+<tspan x="20" y="769"><tspan fill="#c9d1d9"></tspan></tspan>
+<tspan x="20" y="789"><tspan fill="#c9d1d9">Fertig. Nächste Schritte:</tspan></tspan>
+<tspan x="20" y="809"><tspan fill="#c9d1d9">  1. Claude Desktop komplett beenden (Tray-Symbol -&gt; Beenden) und neu starten</tspan></tspan>
+<tspan x="20" y="829"><tspan fill="#c9d1d9">  2. Einstellungen -&gt; Connectors -&gt; meta-ads: create_*/update_*-Tools auf 'Immer fragen' stellen</tspan></tspan>
+<tspan x="20" y="849"><tspan fill="#c9d1d9">  3. Token regelmäßig prüfen: venv\Scripts\python.exe check_token.py</tspan></tspan>
 </text>
 </svg>

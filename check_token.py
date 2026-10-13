@@ -15,6 +15,7 @@ from datetime import datetime
 import httpx
 
 from graph_client import GRAPH_BASE_URL
+import settings
 from i18n import add_language_argument, detect_language, t
 from launch_secure import load_secrets
 
@@ -27,6 +28,13 @@ EXPECTED_SCOPES = frozenset({
     # page/Instagram identity for ad creatives (get_account_pages, create_ad_creative)
     "pages_show_list", "pages_read_engagement", "pages_manage_ads", "instagram_basic",
 })
+INSTAGRAM_INSIGHTS_SCOPES = frozenset({"instagram_manage_insights"})
+
+
+def expected_scopes(environ):
+    """Reels tools need insights access; without them that scope is unneeded."""
+    enabled = settings.is_enabled(environ.get(settings.ENV_ENABLE_INSTAGRAM))
+    return EXPECTED_SCOPES | INSTAGRAM_INSIGHTS_SCOPES if enabled else EXPECTED_SCOPES
 
 
 @dataclass
@@ -46,7 +54,7 @@ def _expiry_line(label, timestamp, now, lang, report):
         report.warnings.append(t(lang, "token_expiring", label=label, days=days))
 
 
-def assess(data, now, lang):
+def assess(data, now, lang, expected=EXPECTED_SCOPES):
     report = Report()
     is_valid = bool(data.get("is_valid"))
     report.lines.append(t(lang, "token_valid", value=t(lang, "yes" if is_valid else "no")))
@@ -58,7 +66,7 @@ def assess(data, now, lang):
 
     scopes = sorted(data.get("scopes", []))
     report.lines.append(t(lang, "token_scopes", scopes=", ".join(scopes) or "-"))
-    extra = [scope for scope in scopes if scope not in EXPECTED_SCOPES]
+    extra = [scope for scope in scopes if scope not in expected]
     if extra:
         report.warnings.append(t(lang, "token_extra_scopes", scopes=", ".join(extra)))
     return report
@@ -101,7 +109,7 @@ def main(argv=None):
         print(t(lang, "token_failed", kind=type(err).__name__, detail=err), file=sys.stderr)
         return 2
 
-    report = assess(data, time.time(), lang)
+    report = assess(data, time.time(), lang, expected_scopes(os.environ))
     for line in report.lines:
         print(line)
     for warning in report.warnings:

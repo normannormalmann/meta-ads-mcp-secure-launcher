@@ -103,3 +103,13 @@ def test_main_prints_report_without_secrets(capsys, monkeypatch, lang):
     assert exit_code == 0
     assert secrets["META_ACCESS_TOKEN"] not in output
     assert secrets["META_APP_SECRET"] not in output
+
+
+def test_instagram_insights_scope_needed_only_when_enabled():
+    scopes = ["ads_management", "ads_read", "instagram_basic", "instagram_manage_insights"]
+
+    default = check_token.assess(debug_data(scopes=scopes), NOW, "en")
+    enabled = check_token.assess(debug_data(scopes=scopes), NOW, "en", check_token.expected_scopes({"META_ENABLE_INSTAGRAM_INSIGHTS": "1"}))
+
+    assert "instagram_manage_insights" in default.warnings[0]
+    assert enabled.warnings == []

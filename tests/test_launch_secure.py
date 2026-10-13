@@ -38,3 +38,10 @@ def test_invalid_default_account_stops_start(capsys):
 
 def test_valid_default_account_passes():
     assert launch_secure.check_extension_config({"META_DEFAULT_ACCOUNT_ID": "123"}) == "act_123"
+
+
+def test_invalid_default_ig_user_stops_start(capsys):
+    with pytest.raises(SystemExit):
+        launch_secure.check_extension_config({"META_DEFAULT_IG_USER_ID": "@brand"})
+
+    assert "META_DEFAULT_IG_USER_ID" in capsys.readouterr().err

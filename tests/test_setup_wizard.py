@@ -33,8 +33,8 @@ def write_config(path, config):
 
 
 def happy_answers(legacy=True):
-    # app id, default account, store credentials?, daily, lifetime, domains, [remove legacy?], write config?
-    return [APP_ID, "", "y", "", "", ""] + ([""] if legacy else []) + [""]
+    # app id, default account, instagram?, store credentials?, daily, lifetime, domains, [remove legacy?], write config?
+    return [APP_ID, "", "", "y", "", "", ""] + ([""] if legacy else []) + [""]
 
 
 def test_happy_path_writes_entry_keeps_other_servers_and_removes_legacy(root, tmp_path):
@@ -73,7 +73,7 @@ def test_check_token_receives_app_id_and_language(root, tmp_path):
 
 def test_custom_limits_are_written(root, tmp_path):
     config_path = tmp_path / "c.json"
-    wizard, _, _ = make_wizard(root, [APP_ID, "", "n", "100", "2000", "", ""], config_path, results={"store_secrets --status": 1})
+    wizard, _, _ = make_wizard(root, [APP_ID, "", "", "n", "100", "2000", "", ""], config_path, results={"store_secrets --status": 1})
 
     wizard.run()
 
@@ -83,7 +83,7 @@ def test_custom_limits_are_written(root, tmp_path):
 
 
 def test_invalid_inputs_are_asked_again(root, tmp_path):
-    answers = ["abc", APP_ID, "", "n", "-5", "0", "100", "", "", "maybe", "y"]
+    answers = ["abc", APP_ID, "", "", "n", "-5", "0", "100", "", "", "maybe", "y"]
     wizard, console, _ = make_wizard(root, answers, tmp_path / "c.json", results={"store_secrets --status": 1})
 
     assert wizard.run() == 0
@@ -93,7 +93,7 @@ def test_invalid_inputs_are_asked_again(root, tmp_path):
 
 
 def test_existing_credentials_are_kept_by_default(root, tmp_path):
-    wizard, _, system = make_wizard(root, [APP_ID, "", "", "", "", "", ""], tmp_path / "c.json", results={"store_secrets --status": 0})
+    wizard, _, system = make_wizard(root, [APP_ID, "", "", "", "", "", "", ""], tmp_path / "c.json", results={"store_secrets --status": 0})
 
     wizard.run()
 
@@ -131,7 +131,7 @@ def test_install_failure_aborts(root):
 def test_invalid_json_config_is_left_untouched(root, tmp_path):
     config_path = tmp_path / "c.json"
     config_path.write_text("{ broken", encoding="utf-8")
-    wizard, console, _ = make_wizard(root, [APP_ID, "", "n", "", "", ""], config_path, results={"store_secrets --status": 1})
+    wizard, console, _ = make_wizard(root, [APP_ID, "", "", "n", "", "", ""], config_path, results={"store_secrets --status": 1})
 
     assert wizard.run() == 0
     assert config_path.read_text(encoding="utf-8") == "{ broken"
@@ -142,7 +142,7 @@ def test_declining_write_leaves_config_unchanged(root, tmp_path):
     config_path = tmp_path / "c.json"
     write_config(config_path, {"mcpServers": {"other": OTHER_SERVER}})
     original = config_path.read_text(encoding="utf-8")
-    wizard, _, _ = make_wizard(root, [APP_ID, "", "n", "", "", "", "n"], config_path, results={"store_secrets --status": 1})
+    wizard, _, _ = make_wizard(root, [APP_ID, "", "", "n", "", "", "", "n"], config_path, results={"store_secrets --status": 1})
 
     wizard.run()
 
@@ -151,7 +151,7 @@ def test_declining_write_leaves_config_unchanged(root, tmp_path):
 
 
 def test_missing_config_prints_manual_snippet(root):
-    wizard, console, _ = make_wizard(root, [APP_ID, "", "n", "", "", ""], None, results={"store_secrets --status": 1})
+    wizard, console, _ = make_wizard(root, [APP_ID, "", "", "n", "", "", ""], None, results={"store_secrets --status": 1})
 
     assert wizard.run() == 0
     assert '"mcpServers"' in console.text()
@@ -165,7 +165,7 @@ def test_eof_aborts_cleanly(root):
 
 
 def test_german_wizard_runs(root, tmp_path):
-    wizard, console, _ = make_wizard(root, [APP_ID, "", "j", "", "", "", ""], tmp_path / "c.json", lang="de", results={"store_secrets --status": 1})
+    wizard, console, _ = make_wizard(root, [APP_ID, "", "", "j", "", "", "", ""], tmp_path / "c.json", lang="de", results={"store_secrets --status": 1})
 
     assert wizard.run() == 0
     assert "Schritt 1/7" in console.text()
@@ -188,7 +188,7 @@ def test_find_claude_config_defaults_to_appdata(tmp_path):
 
 def test_allowed_domains_are_normalized_and_written(root, tmp_path):
     config_path = tmp_path / "c.json"
-    wizard, _, _ = make_wizard(root, [APP_ID, "", "n", "", "", "Shop.Example.org, example.com", ""], config_path, results={"store_secrets --status": 1})
+    wizard, _, _ = make_wizard(root, [APP_ID, "", "", "n", "", "", "Shop.Example.org, example.com", ""], config_path, results={"store_secrets --status": 1})
 
     wizard.run()
 
@@ -198,7 +198,7 @@ def test_allowed_domains_are_normalized_and_written(root, tmp_path):
 
 def test_invalid_domains_are_asked_again(root, tmp_path):
     config_path = tmp_path / "c.json"
-    wizard, console, _ = make_wizard(root, [APP_ID, "", "n", "", "", "https://example.com", "example.com", ""], config_path, results={"store_secrets --status": 1})
+    wizard, console, _ = make_wizard(root, [APP_ID, "", "", "n", "", "", "https://example.com", "example.com", ""], config_path, results={"store_secrets --status": 1})
 
     assert wizard.run() == 0
     assert "domains like example.com" in console.text()
@@ -212,7 +212,7 @@ def test_no_domain_entry_without_answer(root):
 
 def test_default_account_is_normalized_and_written(root, tmp_path):
     config_path = tmp_path / "c.json"
-    wizard, _, _ = make_wizard(root, [APP_ID, "act-x", "987654321", "n", "", "", "", ""], config_path, results={"store_secrets --status": 1})
+    wizard, _, _ = make_wizard(root, [APP_ID, "act-x", "987654321", "", "n", "", "", "", ""], config_path, results={"store_secrets --status": 1})
 
     wizard.run()
 
@@ -224,3 +224,30 @@ def test_no_default_account_entry_without_answer(root):
     entry = setup_wizard.build_server_entry(Path("python.exe"), root / "launch_secure.py", APP_ID, 100, 1000)
 
     assert "META_DEFAULT_ACCOUNT_ID" not in entry["env"]
+
+
+def test_instagram_option_is_written_and_passed_to_token_check(root, tmp_path):
+    config_path = tmp_path / "c.json"
+    answers = [APP_ID, "", "y", "@brand", "17841400000000001", "n", "", "", "", ""]
+    wizard, console, system = make_wizard(root, answers, config_path, results={"store_secrets --status": 1})
+
+    assert wizard.run() == 0
+
+    env = json.loads(config_path.read_text(encoding="utf-8"))["mcpServers"]["meta-ads"]["env"]
+    assert env["META_ENABLE_INSTAGRAM_INSIGHTS"] == "1"
+    assert env["META_DEFAULT_IG_USER_ID"] == "17841400000000001"
+    assert "numeric" in console.text()
+    [(_, _, token_env)] = [call for call in system.calls if call[0] == "check_token"]
+    assert token_env["META_ENABLE_INSTAGRAM_INSIGHTS"] == "1"
+
+
+def test_instagram_is_off_by_default(root, tmp_path):
+    config_path = tmp_path / "c.json"
+    wizard, _, system = make_wizard(root, happy_answers(legacy=False), config_path, results={"store_secrets --status": 1})
+
+    wizard.run()
+
+    env = json.loads(config_path.read_text(encoding="utf-8"))["mcpServers"]["meta-ads"]["env"]
+    assert "META_ENABLE_INSTAGRAM_INSIGHTS" not in env
+    [(_, _, token_env)] = [call for call in system.calls if call[0] == "check_token"]
+    assert token_env is None

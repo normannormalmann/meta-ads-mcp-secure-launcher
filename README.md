@@ -53,6 +53,7 @@ The typical `meta-ads-mcp` setup puts `META_APP_SECRET` and `META_ACCESS_TOKEN` 
 - **Tool annotations** – all 41 upstream tools are marked as read-only, additive or destructive (MCP `readOnlyHint`/`destructiveHint`). Tools with large results declare `anthropic/maxResultSizeChars` for Claude Code.
 - **Delivery status** – the extra tool `get_campaign_delivery` shows which campaigns really deliver, including campaigns that still say ACTIVE although they ended.
 - **Default ad account** – optional; Claude then does not have to ask for the account ID in every chat.
+- **Instagram Reels (opt-in)** – organic reach, views, likes, shares, saves and watch time of your Reels, plus public posts of other business accounts.
 - **Token check** – shows validity, expiry and permissions without ever printing the token, and warns about upcoming expiry and unneeded permissions. Suitable as a scheduled task.
 - **Setup wizard** – installs everything, stores the credentials with visible feedback (length and last 4 characters), checks the token and writes the Claude Desktop entry after asking, with a backup.
 - **Bilingual** – the wizard and the helper scripts speak English and German.
@@ -162,6 +163,8 @@ Do **not** put `META_APP_SECRET` or `META_ACCESS_TOKEN` into this file.
 | `META_GUARD_MAX_DAILY_BUDGET` | Claude Desktop entry | `250` | Maximum daily budget per object, in account currency |
 | `META_GUARD_MAX_LIFETIME_BUDGET` | Claude Desktop entry | `5000` | Maximum lifetime budget / spend cap per object, in account currency |
 | `META_DEFAULT_ACCOUNT_ID` | Claude Desktop entry | – | Default ad account (`act_…`), passed to Claude as server instructions and used by `get_campaign_delivery` |
+| `META_ENABLE_INSTAGRAM_INSIGHTS` | Claude Desktop entry | off | `1` registers the Instagram Reels tools; `check_token.py` then treats `instagram_manage_insights` as needed |
+| `META_DEFAULT_IG_USER_ID` | Claude Desktop entry | – | Default numeric Instagram user ID for the Reels tools |
 | `META_GUARD_ALLOWED_URL_DOMAINS` | Claude Desktop entry | empty (rule off) | Comma-separated domains that ad links may point to, e.g. `example.com,shop.example.org` (subdomains included) |
 | `META_GUARD_ALLOW_PIPEBOARD` | Claude Desktop entry | off | `1` allows requests to Pipeboard's servers |
 | `META_MCP_LANG` | environment | system language | `de` or `en` for the wizard and the helper scripts |
@@ -201,7 +204,7 @@ The Pipeboard rule is defence in depth: the optional `duplicate_*` tools of `met
 | Add | `create_ad`, `create_adset`, `create_campaign`, `create_ad_creative`, `upload_ad_image`, `duplicate_*` | not read-only, not destructive |
 | Modify | `update_*`, `create_budget_schedule` | `destructiveHint` |
 | Local file | `save_ad_image_locally` | not read-only, no network |
-| Launcher | `get_campaign_delivery` (see below) | `readOnlyHint` |
+| Launcher | `get_campaign_delivery`, `get_instagram_*` (see below) | `readOnlyHint` |
 
 A test fails as soon as an upstream update adds a tool that is not classified. At runtime, unknown tools are treated as destructive. `get_insights`, `get_ads`, `get_adsets` and `get_campaigns` also declare `anthropic/maxResultSizeChars` (500k/250k/150k/100k), which Claude Code uses to keep large results in the conversation. Whether Claude Desktop uses the annotations or this value is not documented. Setting tools to *"Always ask"* remains the reliable way.
 
@@ -222,6 +225,26 @@ The Graph API has no field for the *Delivery* column in Ads Manager. `get_campai
 | `PAUSED`, `WITH_ISSUES`, `IN_PROCESS`, `ARCHIVED`, `DELETED` | Taken over from `effective_status` |
 
 Parameters: `account_id` (optional with a default account), `delivery_filter` (e.g. `ACTIVE`), `limit` (default 100, max 500). The answer contains counts per status and the campaigns with `delivery` and `delivery_reason`.
+
+### Instagram Reels (opt-in)
+
+With `META_ENABLE_INSTAGRAM_INSIGHTS=1` (the wizard asks for it), four read-only tools are added. They use the Instagram Graph API with Facebook Login on `graph.facebook.com`.
+
+| Tool | Returns |
+|---|---|
+| `get_instagram_accounts` | Instagram Business/Creator accounts linked to your Facebook Pages, with their `ig_user_id` |
+| `get_instagram_reels` | Your Reels, newest first (`limit` up to 100, optional `since` date) |
+| `get_instagram_reel_insights` | `reach`, `views`, `likes`, `comments`, `shares`, `saved`, `total_interactions`, `ig_reels_avg_watch_time` (ms), `reposts` for one Reel |
+| `get_instagram_public_media` | Recent public posts of **another** Business/Creator account via Business Discovery: likes, comments and views, optionally Reels only |
+
+**Requirements:** an Instagram Business or Creator account linked to a Facebook Page, and a token with `instagram_basic`, `instagram_manage_insights`, `pages_read_engagement` and `pages_show_list` (plus `ads_read`/`ads_management` if the Page role comes from Business Manager, which is usual for system users).
+
+**Limits (per Meta documentation):**
+
+- Insight values are **organic only**. Interactions from ads are not counted. For paid results use `get_insights`.
+- Data can be delayed up to 48 hours and is kept for up to 2 years. Media inside albums have no insights. Metrics without data are returned as `null`, not `0`.
+- `views` and `total_interactions` are marked as "in development" by Meta, `reach` is estimated.
+- Other accounts: only public posts of Business/Creator accounts via Business Discovery, **no insights**. Personal and age-restricted accounts are not available.
 
 ## Token check
 
@@ -287,7 +310,8 @@ venv\Scripts\python.exe -m tools.render_screenshots   # regenerate docs/screensh
 | `extensions.py` | Launcher tools and default-account instructions |
 | `delivery.py` | Delivery status logic |
 | `graph_client.py` | Minimal Graph API client for launcher tools |
-| `settings.py` | Shared configuration values (default account) |
+| `settings.py` | Shared configuration values (default account, Instagram switches) |
+| `instagram.py` | Instagram Reels tools (opt-in) |
 | `store_secrets.py` | Store credentials (hidden input, `--status`) |
 | `check_token.py` | Token validity, expiry, permissions |
 | `setup_wizard.py` | Setup wizard (standard library only) |

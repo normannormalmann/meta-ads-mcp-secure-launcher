@@ -109,3 +109,13 @@ def test_check_token_uses_shared_api_version():
     import check_token
 
     assert check_token.GRAPH_DEBUG_URL == f"{graph_client.GRAPH_BASE_URL}/debug_token"
+
+
+def test_iter_pages_yields_each_page():
+    pages = {None: {"data": [{"id": "1"}], "paging": {"cursors": {"after": "A"}, "next": "n"}}, "A": {"data": [{"id": "2"}]}}
+
+    async def collect():
+        client = client_with(lambda request: httpx.Response(200, json=pages[request.url.params.get("after")]))
+        return [page async for page in client.iter_pages("x/media", page_size=1)]
+
+    assert run(collect()) == [[{"id": "1"}], [{"id": "2"}]]

@@ -7,9 +7,9 @@ the ad sets' end_time/effective_status.
 """
 from collections import Counter
 from dataclasses import dataclass
-from datetime import datetime
 
-TIME_FORMAT = "%Y-%m-%dT%H:%M:%S%z"
+from graph_client import parse_graph_time as _parse_time
+
 PASSTHROUGH_STATUSES = ("DELETED", "ARCHIVED", "PAUSED", "WITH_ISSUES", "IN_PROCESS")
 CAMPAIGN_FIELDS = (
     "id,name,objective,status,configured_status,effective_status,start_time,stop_time,"
@@ -21,13 +21,6 @@ CAMPAIGN_FIELDS = (
 class Delivery:
     status: str
     reason: str
-
-
-def _parse_time(value):
-    try:
-        return datetime.strptime(value, TIME_FORMAT) if value else None
-    except ValueError:
-        return None
 
 
 def _ad_set_delivery(ad_sets, now):

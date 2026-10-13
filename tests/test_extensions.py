@@ -117,5 +117,8 @@ def test_register_without_default_account_leaves_instructions():
 def test_launcher_tools_are_classified_and_do_not_clash_with_upstream():
     from tests import upstream_scan
 
-    assert set(extensions.TOOL_NAMES) == set(tool_policy.LAUNCHER_TOOL_CATEGORIES)
-    assert not set(extensions.TOOL_NAMES) & upstream_scan.registered_tool_names()
+    import instagram
+
+    launcher_tools = set(extensions.TOOL_NAMES) | set(instagram.TOOL_NAMES)
+    assert launcher_tools == set(tool_policy.LAUNCHER_TOOL_CATEGORIES)
+    assert not launcher_tools & upstream_scan.registered_tool_names()

@@ -8,6 +8,8 @@ import os
 from datetime import datetime, timezone
 
 import delivery
+import instagram
+import settings
 from graph_client import GraphClient, GraphError
 from settings import ENV_DEFAULT_ACCOUNT, parse_account_id
 
@@ -60,7 +62,7 @@ def _instructions(existing, default_account):
 
 
 def register(server, environ=None, client_factory=None, clock=None):
-    """Adds the launcher tools and default-account instructions to a FastMCP server."""
+    """Adds the launcher tools (Instagram tools only if enabled) and default-account instructions."""
     environ = os.environ if environ is None else environ
     default_account = parse_account_id(environ.get(ENV_DEFAULT_ACCOUNT))
     client_factory = client_factory or (lambda: GraphClient.from_env(environ))
@@ -68,6 +70,8 @@ def register(server, environ=None, client_factory=None, clock=None):
 
     server.add_tool(make_campaign_delivery_tool(client_factory, default_account, clock),
                     name="get_campaign_delivery", description=DELIVERY_DESCRIPTION)
+    if settings.is_enabled(environ.get(settings.ENV_ENABLE_INSTAGRAM)):
+        instagram.register(server, client_factory, settings.parse_ig_user_id(environ.get(settings.ENV_DEFAULT_IG_USER)))
     if default_account:
         low_level = server._mcp_server
         low_level.instructions = _instructions(low_level.instructions, default_account)

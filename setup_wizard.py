@@ -46,10 +46,13 @@ def find_claude_config(environ):
     return Path(roaming, "Claude", "claude_desktop_config.json") if roaming else None
 
 
-def build_server_entry(python_exe, launcher, app_id, daily_limit, lifetime_limit, allowed_domains="", default_account=None):
+def build_server_entry(python_exe, launcher, app_id, daily_limit, lifetime_limit, allowed_domains="", default_account=None,
+                       instagram=False, default_ig_user=None):
     env = {
         "META_APP_ID": app_id,
         **({settings.ENV_DEFAULT_ACCOUNT: default_account} if default_account else {}),
+        **({settings.ENV_ENABLE_INSTAGRAM: "1"} if instagram else {}),
+        **({settings.ENV_DEFAULT_IG_USER: default_ig_user} if instagram and default_ig_user else {}),
         "META_GUARD_MAX_DAILY_BUDGET": str(daily_limit),
         "META_GUARD_MAX_LIFETIME_BUDGET": str(lifetime_limit),
     }
@@ -61,6 +64,14 @@ def build_server_entry(python_exe, launcher, app_id, daily_limit, lifetime_limit
 def is_valid_account_id(value):
     try:
         settings.parse_account_id(value)
+    except ValueError:
+        return False
+    return True
+
+
+def is_valid_ig_user_id(value):
+    try:
+        settings.parse_ig_user_id(value)
     except ValueError:
         return False
     return True
@@ -139,6 +150,8 @@ class Wizard:
         self.python = venv_python(root)
         self.app_id = None
         self.default_account = None
+        self.instagram = False
+        self.default_ig_user = None
         self.limits = (DEFAULT_DAILY_LIMIT, DEFAULT_LIFETIME_LIMIT)
         self.allowed_domains = ""
 
@@ -195,8 +208,8 @@ class Wizard:
                 return answer
             self._warn(error_key)
 
-    def _run_python(self, *args):
-        return self.system.run([self.python, *args])
+    def _run_python(self, *args, env=None):
+        return self.system.run([self.python, *args], env=env)
 
     # --- steps ----------------------------------------------------------
     def check_prerequisites(self):
@@ -249,6 +262,10 @@ class Wizard:
         self.app_id = self._ask_value("ask_app_id", None, lambda v: v.isdigit() and low <= len(v) <= high, "err_app_id")
         account = self._ask_value("ask_default_account", "", is_valid_account_id, "err_default_account")
         self.default_account = settings.parse_account_id(account)
+        self.instagram = self._confirm("ask_enable_instagram", default=False)
+        if self.instagram:
+            ig_user = self._ask_value("ask_default_ig_user", "", is_valid_ig_user_id, "err_default_ig_user")
+            self.default_ig_user = settings.parse_ig_user_id(ig_user)
         return True
 
     def store_credentials(self):
@@ -272,7 +289,8 @@ class Wizard:
     def check_token(self):
         self._heading(5, "step_token")
         self._say("token_checking")
-        code = self._run_python(self.root / "check_token.py", "--app-id", self.app_id, "--lang", self.lang)
+        env = {**os.environ, settings.ENV_ENABLE_INSTAGRAM: "1"} if self.instagram else None
+        code = self._run_python(self.root / "check_token.py", "--app-id", self.app_id, "--lang", self.lang, env=env)
         if code == 0:
             self._ok("ok_token")
         elif code == 1:
@@ -294,7 +312,8 @@ class Wizard:
 
     def configure_claude(self):
         self._heading(7, "step_claude")
-        entry = build_server_entry(self.python, self.root / "launch_secure.py", self.app_id, *self.limits, self.allowed_domains, self.default_account)
+        entry = build_server_entry(self.python, self.root / "launch_secure.py", self.app_id, *self.limits, self.allowed_domains, self.default_account,
+                                   self.instagram, self.default_ig_user)
         if self.config_path is None:
             self._warn("claude_config_missing")
             self._json({"mcpServers": {SERVER_NAME: entry}})

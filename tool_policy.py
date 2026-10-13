@@ -46,6 +46,11 @@ TOOL_CATEGORIES = {
 # tools added by the launcher itself (extensions.py)
 LAUNCHER_TOOL_CATEGORIES = {
     "get_campaign_delivery": READ,
+    # instagram.py, only registered with META_ENABLE_INSTAGRAM_INSIGHTS=1
+    "get_instagram_accounts": READ,
+    "get_instagram_reels": READ,
+    "get_instagram_reel_insights": READ,
+    "get_instagram_public_media": READ,
 }
 
 MAX_RESULT_SIZE_KEY = "anthropic/maxResultSizeChars"
@@ -56,6 +61,8 @@ RESULT_SIZE_LIMITS = {
     "get_adsets": 150_000,
     "get_campaigns": 100_000,
     "get_campaign_delivery": 100_000,
+    "get_instagram_reels": 100_000,
+    "get_instagram_public_media": 100_000,
 }
 
 logger = logging.getLogger("meta-ads-mcp.tool-policy")

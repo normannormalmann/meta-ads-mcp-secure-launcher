@@ -63,7 +63,11 @@ def load_policy(environ):
 def check_extension_config(environ):
     import settings
 
-    return _config_or_exit(lambda env: settings.parse_account_id(env.get(settings.ENV_DEFAULT_ACCOUNT)), environ)
+    def parse(env):
+        settings.parse_ig_user_id(env.get(settings.ENV_DEFAULT_IG_USER))
+        return settings.parse_account_id(env.get(settings.ENV_DEFAULT_ACCOUNT))
+
+    return _config_or_exit(parse, environ)
 
 
 def main():

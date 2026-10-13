@@ -53,6 +53,7 @@ In der üblichen `meta-ads-mcp`-Einrichtung stehen `META_APP_SECRET` und `META_A
 - **Tool-Hinweise**: Alle 41 Upstream-Tools sind als lesend, hinzufügend oder verändernd markiert (MCP `readOnlyHint`/`destructiveHint`). Tools mit großen Ergebnissen geben `anthropic/maxResultSizeChars` für Claude Code an.
 - **Auslieferungsstatus**: Das zusätzliche Tool `get_campaign_delivery` zeigt, welche Kampagnen wirklich ausliefern, auch solche, die noch „ACTIVE“ melden, obwohl sie beendet sind.
 - **Standard-Werbekonto**: optional. Claude muss dann nicht in jedem Chat nach der Konto-ID fragen.
+- **Instagram-Reels (optional)**: organische Reichweite, Aufrufe, Likes, Shares, Speicherungen und Wiedergabedauer deiner Reels, dazu öffentliche Beiträge anderer Business-Konten.
 - **Token-Prüfung**: zeigt Gültigkeit, Ablaufdatum und Rechte, ohne den Token je auszugeben, und warnt vor baldigem Ablauf und unnötigen Rechten. Lässt sich als geplante Aufgabe einrichten.
 - **Einrichtungsassistent**: installiert alles, speichert die Zugangsdaten mit sichtbarer Rückmeldung (Länge und letzte 4 Zeichen), prüft den Token und schreibt nach Rückfrage den Eintrag für Claude Desktop, mit Sicherung.
 - **Zweisprachig**: Assistent und Hilfsskripte sprechen Deutsch und Englisch.
@@ -162,6 +163,8 @@ Danach diesen Eintrag unter `mcpServers` in `%APPDATA%\Claude\claude_desktop_con
 | `META_GUARD_MAX_DAILY_BUDGET` | Claude-Desktop-Eintrag | `250` | Maximales Tagesbudget pro Objekt, in Kontowährung |
 | `META_GUARD_MAX_LIFETIME_BUDGET` | Claude-Desktop-Eintrag | `5000` | Maximales Laufzeitbudget bzw. Ausgabenlimit pro Objekt, in Kontowährung |
 | `META_DEFAULT_ACCOUNT_ID` | Claude-Desktop-Eintrag | – | Standard-Werbekonto (`act_…`), wird Claude als Server-Anweisung mitgegeben und von `get_campaign_delivery` genutzt |
+| `META_ENABLE_INSTAGRAM_INSIGHTS` | Claude-Desktop-Eintrag | aus | `1` registriert die Instagram-Reels-Tools; `check_token.py` wertet `instagram_manage_insights` dann als benötigt |
+| `META_DEFAULT_IG_USER_ID` | Claude-Desktop-Eintrag | – | Standard-Instagram-User-ID (Ziffern) für die Reels-Tools |
 | `META_GUARD_ALLOWED_URL_DOMAINS` | Claude-Desktop-Eintrag | leer (Regel aus) | Kommagetrennte Domains, auf die Anzeigen-Links zeigen dürfen, z.B. `example.com,shop.example.org` (inkl. Subdomains) |
 | `META_GUARD_ALLOW_PIPEBOARD` | Claude-Desktop-Eintrag | aus | `1` erlaubt Anfragen an die Server von Pipeboard |
 | `META_MCP_LANG` | Umgebung | Systemsprache | `de` oder `en` für Assistent und Hilfsskripte |
@@ -201,7 +204,7 @@ Die Pipeboard-Regel ist eine zusätzliche Absicherung: Die optionalen `duplicate
 | Hinzufügen | `create_ad`, `create_adset`, `create_campaign`, `create_ad_creative`, `upload_ad_image`, `duplicate_*` | nicht nur lesend, nicht zerstörerisch |
 | Verändern | `update_*`, `create_budget_schedule` | `destructiveHint` |
 | Lokale Datei | `save_ad_image_locally` | nicht nur lesend, ohne Netzwerk |
-| Starter | `get_campaign_delivery` (siehe unten) | `readOnlyHint` |
+| Starter | `get_campaign_delivery`, `get_instagram_*` (siehe unten) | `readOnlyHint` |
 
 Ein Test schlägt fehl, sobald ein Upstream-Update ein Tool mitbringt, das nicht eingestuft ist. Zur Laufzeit gelten unbekannte Tools als verändernd. `get_insights`, `get_ads`, `get_adsets` und `get_campaigns` geben zusätzlich `anthropic/maxResultSizeChars` an (500k/250k/150k/100k). Damit behält Claude Code große Ergebnisse im Gespräch. Ob Claude Desktop die Hinweise oder diesen Wert nutzt, ist nicht dokumentiert. Verlässlich bleibt die Einstellung „Immer fragen“.
 
@@ -222,6 +225,26 @@ Die Graph API hat kein Feld für die Spalte *Auslieferung* im Werbeanzeigenmanag
 | `PAUSED`, `WITH_ISSUES`, `IN_PROCESS`, `ARCHIVED`, `DELETED` | Aus `effective_status` übernommen |
 
 Parameter: `account_id` (optional mit Standardkonto), `delivery_filter` (z.B. `ACTIVE`), `limit` (Standard 100, höchstens 500). Die Antwort enthält die Anzahl pro Status und die Kampagnen mit `delivery` und `delivery_reason`.
+
+### Instagram-Reels (optional)
+
+Mit `META_ENABLE_INSTAGRAM_INSIGHTS=1` (der Assistent fragt danach) kommen vier Lese-Tools hinzu. Sie nutzen die Instagram Graph API mit Facebook-Login über `graph.facebook.com`.
+
+| Tool | Liefert |
+|---|---|
+| `get_instagram_accounts` | Instagram-Business- und Creator-Konten, die mit deinen Facebook-Seiten verknüpft sind, mit ihrer `ig_user_id` |
+| `get_instagram_reels` | Deine Reels, neueste zuerst (`limit` bis 100, optional `since`-Datum) |
+| `get_instagram_reel_insights` | `reach`, `views`, `likes`, `comments`, `shares`, `saved`, `total_interactions`, `ig_reels_avg_watch_time` (ms), `reposts` für ein Reel |
+| `get_instagram_public_media` | Aktuelle öffentliche Beiträge eines **anderen** Business- oder Creator-Kontos per Business Discovery: Likes, Kommentare und Aufrufe, optional nur Reels |
+
+**Voraussetzungen:** ein Instagram-Business- oder Creator-Konto, verknüpft mit einer Facebook-Seite, und ein Token mit `instagram_basic`, `instagram_manage_insights`, `pages_read_engagement` und `pages_show_list` (dazu `ads_read`/`ads_management`, wenn die Seitenrolle aus dem Business Manager kommt, bei Systemnutzern üblich).
+
+**Grenzen (laut Meta-Dokumentation):**
+
+- Die Insight-Werte sind **nur organisch**. Interaktionen über Anzeigen zählen nicht. Für bezahlte Ergebnisse `get_insights` nutzen.
+- Daten kommen bis zu 48 Stunden verzögert und werden bis zu 2 Jahre gespeichert. Medien in Alben haben keine Insights. Metriken ohne Daten kommen als `null`, nicht als `0`.
+- `views` und `total_interactions` sind bei Meta als „in Entwicklung“ markiert, `reach` ist geschätzt.
+- Fremde Konten: nur öffentliche Beiträge von Business- oder Creator-Konten per Business Discovery, **keine Insights**. Private und altersbeschränkte Konten sind nicht verfügbar.
 
 ## Token-Prüfung
 
@@ -287,7 +310,8 @@ venv\Scripts\python.exe -m tools.render_screenshots   # docs/screenshots/*.svg n
 | `extensions.py` | Eigene Tools und Server-Anweisung zum Standardkonto |
 | `delivery.py` | Logik für den Auslieferungsstatus |
 | `graph_client.py` | Kleiner Graph-API-Client für die eigenen Tools |
-| `settings.py` | Gemeinsame Einstellungen (Standardkonto) |
+| `settings.py` | Gemeinsame Einstellungen (Standardkonto, Instagram-Schalter) |
+| `instagram.py` | Instagram-Reels-Tools (optional) |
 | `store_secrets.py` | Zugangsdaten speichern (verdeckte Eingabe, `--status`) |
 | `check_token.py` | Gültigkeit, Ablauf und Rechte des Tokens |
 | `setup_wizard.py` | Einrichtungsassistent (nur Standardbibliothek) |

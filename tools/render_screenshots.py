@@ -40,7 +40,8 @@ FAKE_TOKEN_DATA = {
     "application": "My Ads App",
     "expires_at": NOW.timestamp() + 59 * DAY + 3600,
     "data_access_expires_at": 0,
-    "scopes": ["ads_management", "ads_read", "business_management"],
+    "scopes": ["ads_management", "ads_read", "business_management", "instagram_basic", "instagram_manage_insights",
+               "pages_read_engagement", "pages_show_list"],
 }
 
 
@@ -53,7 +54,8 @@ def fake_outputs(lang):
         t(lang, "secret_ok", description=t(lang, "secret_received", length=239, tail="Xk2Q")),
         t(lang, "secret_saved", target="meta-ads-mcp/access_token"),
     ]
-    report = check_token.assess(FAKE_TOKEN_DATA, NOW.timestamp(), lang)
+    expected = check_token.expected_scopes({"META_ENABLE_INSTAGRAM_INSIGHTS": "1"})
+    report = check_token.assess(FAKE_TOKEN_DATA, NOW.timestamp(), lang, expected)
     return {
         "pip": ["Successfully installed meta-ads-mcp-1.0.128 mcp-1.28.1 httpx-0.28.1 pywin32-311 ..."],
         "pytest": ["90 passed in 0.62s"],
@@ -65,7 +67,7 @@ def fake_outputs(lang):
 
 def simulate(lang, config_path):
     yes = "j" if lang == "de" else "y"
-    console = ScriptedConsole([PLACEHOLDER_APP_ID, "act_1234567890", yes, "", "", "example.com", "", ""])
+    console = ScriptedConsole([PLACEHOLDER_APP_ID, "act_1234567890", yes, "17841400000000000", yes, "", "", "example.com", "", ""])
     system = FakeSystem(
         console,
         python=(3, 13, 1),
