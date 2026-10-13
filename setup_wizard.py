@@ -16,6 +16,7 @@ import textwrap
 from datetime import datetime
 from pathlib import Path
 
+import settings
 import url_policy
 from i18n import LANGUAGES, add_language_argument, detect_language, t
 
@@ -45,15 +46,24 @@ def find_claude_config(environ):
     return Path(roaming, "Claude", "claude_desktop_config.json") if roaming else None
 
 
-def build_server_entry(python_exe, launcher, app_id, daily_limit, lifetime_limit, allowed_domains=""):
+def build_server_entry(python_exe, launcher, app_id, daily_limit, lifetime_limit, allowed_domains="", default_account=None):
     env = {
         "META_APP_ID": app_id,
+        **({settings.ENV_DEFAULT_ACCOUNT: default_account} if default_account else {}),
         "META_GUARD_MAX_DAILY_BUDGET": str(daily_limit),
         "META_GUARD_MAX_LIFETIME_BUDGET": str(lifetime_limit),
     }
     if allowed_domains:
         env[url_policy.ENV_ALLOWED_DOMAINS] = allowed_domains
     return {"command": str(python_exe), "args": [str(launcher)], "env": env}
+
+
+def is_valid_account_id(value):
+    try:
+        settings.parse_account_id(value)
+    except ValueError:
+        return False
+    return True
 
 
 def is_valid_domain_list(value):
@@ -128,6 +138,7 @@ class Wizard:
         self.config_path, self.root, self.now = config_path, root, now
         self.python = venv_python(root)
         self.app_id = None
+        self.default_account = None
         self.limits = (DEFAULT_DAILY_LIMIT, DEFAULT_LIFETIME_LIMIT)
         self.allowed_domains = ""
 
@@ -236,6 +247,8 @@ class Wizard:
         self._say("app_hint")
         low, high = APP_ID_LENGTH
         self.app_id = self._ask_value("ask_app_id", None, lambda v: v.isdigit() and low <= len(v) <= high, "err_app_id")
+        account = self._ask_value("ask_default_account", "", is_valid_account_id, "err_default_account")
+        self.default_account = settings.parse_account_id(account)
         return True
 
     def store_credentials(self):
@@ -281,7 +294,7 @@ class Wizard:
 
     def configure_claude(self):
         self._heading(7, "step_claude")
-        entry = build_server_entry(self.python, self.root / "launch_secure.py", self.app_id, *self.limits, self.allowed_domains)
+        entry = build_server_entry(self.python, self.root / "launch_secure.py", self.app_id, *self.limits, self.allowed_domains, self.default_account)
         if self.config_path is None:
             self._warn("claude_config_missing")
             self._json({"mcpServers": {SERVER_NAME: entry}})

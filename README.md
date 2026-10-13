@@ -22,6 +22,7 @@ The launcher does not modify `meta-ads-mcp`. It installs the upstream package fr
 - [Configuration reference](#configuration-reference)
 - [Write guard](#write-guard)
 - [Tool annotations](#tool-annotations)
+- [Additional tools](#additional-tools)
 - [Token check](#token-check)
 - [Updating](#updating)
 - [Troubleshooting](#troubleshooting)
@@ -50,6 +51,8 @@ The typical `meta-ads-mcp` setup puts `META_APP_SECRET` and `META_ACCESS_TOKEN` 
 - **Destination allowlist** – optionally restricts ad links to your own domains, so a prompt injection cannot redirect your ads to someone else's site.
 - **No data to Pipeboard** – requests to Pipeboard's servers are blocked unless you explicitly allow them.
 - **Tool annotations** – all 41 upstream tools are marked as read-only, additive or destructive (MCP `readOnlyHint`/`destructiveHint`). Tools with large results declare `anthropic/maxResultSizeChars` for Claude Code.
+- **Delivery status** – the extra tool `get_campaign_delivery` shows which campaigns really deliver, including campaigns that still say ACTIVE although they ended.
+- **Default ad account** – optional; Claude then does not have to ask for the account ID in every chat.
 - **Token check** – shows validity, expiry and permissions without ever printing the token, and warns about upcoming expiry and unneeded permissions. Suitable as a scheduled task.
 - **Setup wizard** – installs everything, stores the credentials with visible feedback (length and last 4 characters), checks the token and writes the Claude Desktop entry after asking, with a backup.
 - **Bilingual** – the wizard and the helper scripts speak English and German.
@@ -158,6 +161,7 @@ Do **not** put `META_APP_SECRET` or `META_ACCESS_TOKEN` into this file.
 | `META_APP_ID` | Claude Desktop entry | – (required) | ID of your Meta app (not secret) |
 | `META_GUARD_MAX_DAILY_BUDGET` | Claude Desktop entry | `250` | Maximum daily budget per object, in account currency |
 | `META_GUARD_MAX_LIFETIME_BUDGET` | Claude Desktop entry | `5000` | Maximum lifetime budget / spend cap per object, in account currency |
+| `META_DEFAULT_ACCOUNT_ID` | Claude Desktop entry | – | Default ad account (`act_…`), passed to Claude as server instructions and used by `get_campaign_delivery` |
 | `META_GUARD_ALLOWED_URL_DOMAINS` | Claude Desktop entry | empty (rule off) | Comma-separated domains that ad links may point to, e.g. `example.com,shop.example.org` (subdomains included) |
 | `META_GUARD_ALLOW_PIPEBOARD` | Claude Desktop entry | off | `1` allows requests to Pipeboard's servers |
 | `META_MCP_LANG` | environment | system language | `de` or `en` for the wizard and the helper scripts |
@@ -197,8 +201,27 @@ The Pipeboard rule is defence in depth: the optional `duplicate_*` tools of `met
 | Add | `create_ad`, `create_adset`, `create_campaign`, `create_ad_creative`, `upload_ad_image`, `duplicate_*` | not read-only, not destructive |
 | Modify | `update_*`, `create_budget_schedule` | `destructiveHint` |
 | Local file | `save_ad_image_locally` | not read-only, no network |
+| Launcher | `get_campaign_delivery` (see below) | `readOnlyHint` |
 
 A test fails as soon as an upstream update adds a tool that is not classified. At runtime, unknown tools are treated as destructive. `get_insights`, `get_ads`, `get_adsets` and `get_campaigns` also declare `anthropic/maxResultSizeChars` (500k/250k/150k/100k), which Claude Code uses to keep large results in the conversation. Whether Claude Desktop uses the annotations or this value is not documented. Setting tools to *"Always ask"* remains the reliable way.
+
+## Additional tools
+
+The launcher registers its own tools next to the upstream ones. They use a small Graph API client of their own (`graph_client.py`) and therefore pass the write guard as well.
+
+### `get_campaign_delivery`
+
+The Graph API has no field for the *Delivery* column in Ads Manager. `get_campaigns` therefore reports campaigns as `ACTIVE` that ended long ago ([upstream #34](https://github.com/pipeboard-co/meta-ads-mcp/issues/34), [#58](https://github.com/pipeboard-co/meta-ads-mcp/issues/58)). `get_campaign_delivery` combines `effective_status`, `start_time`/`stop_time` and the ad sets' `end_time`/`effective_status`:
+
+| Delivery | Meaning |
+|---|---|
+| `ACTIVE` | Active and within its schedule (budget, billing and ad review are not checked) |
+| `SCHEDULED` | Start time in the future |
+| `COMPLETED` | Stop time passed, or all ad sets reached their end time |
+| `NOT_DELIVERING` | No ad set is active, or the campaign has no ad sets |
+| `PAUSED`, `WITH_ISSUES`, `IN_PROCESS`, `ARCHIVED`, `DELETED` | Taken over from `effective_status` |
+
+Parameters: `account_id` (optional with a default account), `delivery_filter` (e.g. `ACTIVE`), `limit` (default 100, max 500). The answer contains counts per status and the campaigns with `delivery` and `delivery_reason`.
 
 ## Token check
 
@@ -261,6 +284,10 @@ venv\Scripts\python.exe -m tools.render_screenshots   # regenerate docs/screensh
 | `write_guard.py` | Rules for write calls and blocked hosts |
 | `url_policy.py` | Allowed ad destination domains |
 | `tool_policy.py` | Tool annotations and result-size metadata |
+| `extensions.py` | Launcher tools and default-account instructions |
+| `delivery.py` | Delivery status logic |
+| `graph_client.py` | Minimal Graph API client for launcher tools |
+| `settings.py` | Shared configuration values (default account) |
 | `store_secrets.py` | Store credentials (hidden input, `--status`) |
 | `check_token.py` | Token validity, expiry, permissions |
 | `setup_wizard.py` | Setup wizard (standard library only) |

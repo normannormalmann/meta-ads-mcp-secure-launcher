@@ -1,0 +1,73 @@
+"""Tools and server instructions the launcher adds to meta-ads-mcp.
+
+Registered on the upstream FastMCP server before it starts. The tools use the
+launcher's own graph_client, not meta-ads-mcp internals.
+"""
+import json
+import os
+from datetime import datetime, timezone
+
+import delivery
+from graph_client import GraphClient, GraphError
+from settings import ENV_DEFAULT_ACCOUNT, parse_account_id
+
+DEFAULT_CAMPAIGN_LIMIT = 100
+MAX_CAMPAIGN_LIMIT = 500
+TOOL_NAMES = ("get_campaign_delivery",)
+
+DELIVERY_DESCRIPTION = """Get campaigns with a computed delivery status like the "Delivery" column in Meta Ads Manager.
+
+Unlike get_campaigns, this also catches campaigns that still say ACTIVE although they ended:
+it combines effective_status, start_time/stop_time and the ad sets' end_time/effective_status.
+
+Delivery values: ACTIVE, SCHEDULED, COMPLETED, NOT_DELIVERING, PAUSED, WITH_ISSUES,
+IN_PROCESS, ARCHIVED, DELETED. ACTIVE does not check budget, billing or ad review.
+
+Args:
+    account_id: Ad account ID (act_123...). Optional if a default account is configured.
+    delivery_filter: Only return campaigns with this delivery value, e.g. "ACTIVE".
+    limit: Maximum number of campaigns to read (default 100, max 500).
+"""
+
+
+def _error(message):
+    return json.dumps({"error": message}, indent=2)
+
+
+def make_campaign_delivery_tool(client_factory, default_account, clock):
+    async def get_campaign_delivery(account_id: str = "", delivery_filter: str = "", limit: int = DEFAULT_CAMPAIGN_LIMIT) -> str:
+        try:
+            account = parse_account_id(account_id) or default_account
+        except ValueError:
+            return _error(f"Invalid account_id {account_id!r}; expected act_<digits>.")
+        if not account:
+            return _error("No account_id given and no default account configured.")
+        max_items = max(1, min(int(limit), MAX_CAMPAIGN_LIMIT))
+        try:
+            campaigns = await client_factory().get_all(f"{account}/campaigns", {"fields": delivery.CAMPAIGN_FIELDS}, max_items=max_items)
+        except GraphError as err:
+            return _error(str(err))
+        summary = delivery.summarize(campaigns, clock(), only=delivery_filter or None)
+        return json.dumps({"account_id": account, "generated_at": clock().isoformat(), **summary}, indent=2, ensure_ascii=False)
+
+    return get_campaign_delivery
+
+
+def _instructions(existing, default_account):
+    hint = (f"Default Meta ad account: {default_account}. Use it whenever a tool needs an account_id "
+            "and the user has not named another account.")
+    return f"{existing}\n\n{hint}" if existing else hint
+
+
+def register(server, environ=None, client_factory=None, clock=None):
+    """Adds the launcher tools and default-account instructions to a FastMCP server."""
+    environ = os.environ if environ is None else environ
+    default_account = parse_account_id(environ.get(ENV_DEFAULT_ACCOUNT))
+    client_factory = client_factory or (lambda: GraphClient.from_env(environ))
+    clock = clock or (lambda: datetime.now(timezone.utc))
+
+    server.add_tool(make_campaign_delivery_tool(client_factory, default_account, clock),
+                    name="get_campaign_delivery", description=DELIVERY_DESCRIPTION)
+    if default_account:
+        low_level = server._mcp_server
+        low_level.instructions = _instructions(low_level.instructions, default_account)

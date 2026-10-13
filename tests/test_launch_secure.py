@@ -26,3 +26,15 @@ def test_load_policy_exits_on_invalid_configuration(capsys):
 
     assert exc.value.code != 0
     assert "META_GUARD_MAX_DAILY_BUDGET" in capsys.readouterr().err
+
+
+def test_invalid_default_account_stops_start(capsys):
+    with pytest.raises(SystemExit) as exc:
+        launch_secure.check_extension_config({"META_DEFAULT_ACCOUNT_ID": "my account"})
+
+    assert exc.value.code != 0
+    assert "META_DEFAULT_ACCOUNT_ID" in capsys.readouterr().err
+
+
+def test_valid_default_account_passes():
+    assert launch_secure.check_extension_config({"META_DEFAULT_ACCOUNT_ID": "123"}) == "act_123"

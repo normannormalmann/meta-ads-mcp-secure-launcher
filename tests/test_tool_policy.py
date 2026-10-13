@@ -80,7 +80,7 @@ def test_large_result_tools_declare_max_result_size_in_meta():
 
 def test_result_size_limits_respect_claude_code_ceiling():
     assert max(tool_policy.RESULT_SIZE_LIMITS.values()) <= tool_policy.MAX_RESULT_SIZE_CEILING
-    assert set(tool_policy.RESULT_SIZE_LIMITS) <= set(tool_policy.TOOL_CATEGORIES)
+    assert set(tool_policy.RESULT_SIZE_LIMITS) <= set(tool_policy.TOOL_CATEGORIES) | set(tool_policy.LAUNCHER_TOOL_CATEGORIES)
 
 
 def test_every_category_is_known():

@@ -46,14 +46,24 @@ def load_secrets(cred_read=read_windows_credential):
     return secrets
 
 
+def _config_or_exit(parse, environ):
+    try:
+        return parse(environ)
+    except ValueError as err:
+        print(f"meta-ads-mcp: invalid configuration: {err}", file=sys.stderr)
+        sys.exit(1)
+
+
 def load_policy(environ):
     import write_guard
 
-    try:
-        return write_guard.policy_from_env(environ)
-    except ValueError as err:
-        print(f"meta-ads-mcp: invalid write guard configuration: {err}", file=sys.stderr)
-        sys.exit(1)
+    return _config_or_exit(write_guard.policy_from_env, environ)
+
+
+def check_extension_config(environ):
+    import settings
+
+    return _config_or_exit(lambda env: settings.parse_account_id(env.get(settings.ENV_DEFAULT_ACCOUNT)), environ)
 
 
 def main():
@@ -62,15 +72,18 @@ def main():
 
     log_handler = secure_logging.harden_logging()  # before the package import, see secure_logging docstring
     write_guard.install(load_policy(os.environ))
+    check_extension_config(os.environ)
     os.environ.update(load_secrets())
     os.environ.update(HARDENING_ENV)
 
     import meta_ads_mcp  # runs the package's setup_logging()
     from meta_ads_mcp.core.server import mcp_server
 
+    import extensions
     import tool_policy
 
     secure_logging.adopt_package_logger(log_handler)
+    extensions.register(mcp_server)
     tool_policy.apply(mcp_server)
     return meta_ads_mcp.entrypoint()
 

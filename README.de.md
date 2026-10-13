@@ -22,6 +22,7 @@ Der Starter verändert `meta-ads-mcp` nicht. Er installiert das Originalpaket vo
 - [Konfiguration](#konfiguration)
 - [Schreibschutz](#schreibschutz)
 - [Tool-Hinweise](#tool-hinweise)
+- [Zusätzliche Tools](#zusätzliche-tools)
 - [Token-Prüfung](#token-prüfung)
 - [Aktualisieren](#aktualisieren)
 - [Fehlerbehebung](#fehlerbehebung)
@@ -50,6 +51,8 @@ In der üblichen `meta-ads-mcp`-Einrichtung stehen `META_APP_SECRET` und `META_A
 - **Erlaubte Ziel-Domains**: beschränkt Anzeigen-Links optional auf deine eigenen Domains. Eine Prompt-Injection kann deine Anzeigen dann nicht auf fremde Seiten umleiten.
 - **Keine Daten an Pipeboard**: Anfragen an die Server von Pipeboard werden blockiert, solange du sie nicht ausdrücklich erlaubst.
 - **Tool-Hinweise**: Alle 41 Upstream-Tools sind als lesend, hinzufügend oder verändernd markiert (MCP `readOnlyHint`/`destructiveHint`). Tools mit großen Ergebnissen geben `anthropic/maxResultSizeChars` für Claude Code an.
+- **Auslieferungsstatus**: Das zusätzliche Tool `get_campaign_delivery` zeigt, welche Kampagnen wirklich ausliefern, auch solche, die noch „ACTIVE“ melden, obwohl sie beendet sind.
+- **Standard-Werbekonto**: optional. Claude muss dann nicht in jedem Chat nach der Konto-ID fragen.
 - **Token-Prüfung**: zeigt Gültigkeit, Ablaufdatum und Rechte, ohne den Token je auszugeben, und warnt vor baldigem Ablauf und unnötigen Rechten. Lässt sich als geplante Aufgabe einrichten.
 - **Einrichtungsassistent**: installiert alles, speichert die Zugangsdaten mit sichtbarer Rückmeldung (Länge und letzte 4 Zeichen), prüft den Token und schreibt nach Rückfrage den Eintrag für Claude Desktop, mit Sicherung.
 - **Zweisprachig**: Assistent und Hilfsskripte sprechen Deutsch und Englisch.
@@ -158,6 +161,7 @@ Danach diesen Eintrag unter `mcpServers` in `%APPDATA%\Claude\claude_desktop_con
 | `META_APP_ID` | Claude-Desktop-Eintrag | – (Pflicht) | ID deiner Meta-App (nicht geheim) |
 | `META_GUARD_MAX_DAILY_BUDGET` | Claude-Desktop-Eintrag | `250` | Maximales Tagesbudget pro Objekt, in Kontowährung |
 | `META_GUARD_MAX_LIFETIME_BUDGET` | Claude-Desktop-Eintrag | `5000` | Maximales Laufzeitbudget bzw. Ausgabenlimit pro Objekt, in Kontowährung |
+| `META_DEFAULT_ACCOUNT_ID` | Claude-Desktop-Eintrag | – | Standard-Werbekonto (`act_…`), wird Claude als Server-Anweisung mitgegeben und von `get_campaign_delivery` genutzt |
 | `META_GUARD_ALLOWED_URL_DOMAINS` | Claude-Desktop-Eintrag | leer (Regel aus) | Kommagetrennte Domains, auf die Anzeigen-Links zeigen dürfen, z.B. `example.com,shop.example.org` (inkl. Subdomains) |
 | `META_GUARD_ALLOW_PIPEBOARD` | Claude-Desktop-Eintrag | aus | `1` erlaubt Anfragen an die Server von Pipeboard |
 | `META_MCP_LANG` | Umgebung | Systemsprache | `de` oder `en` für Assistent und Hilfsskripte |
@@ -197,8 +201,27 @@ Die Pipeboard-Regel ist eine zusätzliche Absicherung: Die optionalen `duplicate
 | Hinzufügen | `create_ad`, `create_adset`, `create_campaign`, `create_ad_creative`, `upload_ad_image`, `duplicate_*` | nicht nur lesend, nicht zerstörerisch |
 | Verändern | `update_*`, `create_budget_schedule` | `destructiveHint` |
 | Lokale Datei | `save_ad_image_locally` | nicht nur lesend, ohne Netzwerk |
+| Starter | `get_campaign_delivery` (siehe unten) | `readOnlyHint` |
 
 Ein Test schlägt fehl, sobald ein Upstream-Update ein Tool mitbringt, das nicht eingestuft ist. Zur Laufzeit gelten unbekannte Tools als verändernd. `get_insights`, `get_ads`, `get_adsets` und `get_campaigns` geben zusätzlich `anthropic/maxResultSizeChars` an (500k/250k/150k/100k). Damit behält Claude Code große Ergebnisse im Gespräch. Ob Claude Desktop die Hinweise oder diesen Wert nutzt, ist nicht dokumentiert. Verlässlich bleibt die Einstellung „Immer fragen“.
+
+## Zusätzliche Tools
+
+Der Starter registriert eigene Tools neben denen des Originalpakets. Sie nutzen einen eigenen kleinen Graph-API-Client (`graph_client.py`) und laufen deshalb ebenfalls durch den Schreibschutz.
+
+### `get_campaign_delivery`
+
+Die Graph API hat kein Feld für die Spalte *Auslieferung* im Werbeanzeigenmanager. `get_campaigns` meldet deshalb auch Kampagnen als `ACTIVE`, die längst beendet sind ([Upstream #34](https://github.com/pipeboard-co/meta-ads-mcp/issues/34), [#58](https://github.com/pipeboard-co/meta-ads-mcp/issues/58)). `get_campaign_delivery` kombiniert `effective_status`, `start_time`/`stop_time` sowie `end_time`/`effective_status` der Anzeigengruppen:
+
+| Auslieferung | Bedeutung |
+|---|---|
+| `ACTIVE` | Aktiv und im Zeitplan (Budget, Zahlung und Anzeigenprüfung werden nicht geprüft) |
+| `SCHEDULED` | Startzeit liegt in der Zukunft |
+| `COMPLETED` | Endzeit vorbei oder alle Anzeigengruppen beendet |
+| `NOT_DELIVERING` | Keine Anzeigengruppe aktiv oder keine Anzeigengruppen vorhanden |
+| `PAUSED`, `WITH_ISSUES`, `IN_PROCESS`, `ARCHIVED`, `DELETED` | Aus `effective_status` übernommen |
+
+Parameter: `account_id` (optional mit Standardkonto), `delivery_filter` (z.B. `ACTIVE`), `limit` (Standard 100, höchstens 500). Die Antwort enthält die Anzahl pro Status und die Kampagnen mit `delivery` und `delivery_reason`.
 
 ## Token-Prüfung
 
@@ -261,6 +284,10 @@ venv\Scripts\python.exe -m tools.render_screenshots   # docs/screenshots/*.svg n
 | `write_guard.py` | Regeln für Schreibaufrufe und gesperrte Hosts |
 | `url_policy.py` | Erlaubte Ziel-Domains für Anzeigen |
 | `tool_policy.py` | Tool-Hinweise und Größenangaben für Ergebnisse |
+| `extensions.py` | Eigene Tools und Server-Anweisung zum Standardkonto |
+| `delivery.py` | Logik für den Auslieferungsstatus |
+| `graph_client.py` | Kleiner Graph-API-Client für die eigenen Tools |
+| `settings.py` | Gemeinsame Einstellungen (Standardkonto) |
 | `store_secrets.py` | Zugangsdaten speichern (verdeckte Eingabe, `--status`) |
 | `check_token.py` | Gültigkeit, Ablauf und Rechte des Tokens |
 | `setup_wizard.py` | Einrichtungsassistent (nur Standardbibliothek) |

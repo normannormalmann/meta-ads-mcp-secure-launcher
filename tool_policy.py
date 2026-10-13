@@ -43,6 +43,11 @@ TOOL_CATEGORIES = {
     "save_ad_image_locally": LOCAL_WRITE,
 }
 
+# tools added by the launcher itself (extensions.py)
+LAUNCHER_TOOL_CATEGORIES = {
+    "get_campaign_delivery": READ,
+}
+
 MAX_RESULT_SIZE_KEY = "anthropic/maxResultSizeChars"
 MAX_RESULT_SIZE_CEILING = 500_000  # hard ceiling documented for Claude Code
 RESULT_SIZE_LIMITS = {
@@ -50,6 +55,7 @@ RESULT_SIZE_LIMITS = {
     "get_ads": 250_000,
     "get_adsets": 150_000,
     "get_campaigns": 100_000,
+    "get_campaign_delivery": 100_000,
 }
 
 logger = logging.getLogger("meta-ads-mcp.tool-policy")
@@ -58,8 +64,9 @@ logger = logging.getLogger("meta-ads-mcp.tool-policy")
 def apply(server):
     """Annotates all registered tools of a FastMCP server; returns names of unknown tools."""
     unknown = []
+    categories = {**TOOL_CATEGORIES, **LAUNCHER_TOOL_CATEGORIES}
     for tool in server._tool_manager.list_tools():
-        category = TOOL_CATEGORIES.get(tool.name)
+        category = categories.get(tool.name)
         if category is None:
             unknown.append(tool.name)
             category = MODIFY

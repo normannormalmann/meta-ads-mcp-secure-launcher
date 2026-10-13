@@ -14,10 +14,11 @@ from datetime import datetime
 
 import httpx
 
+from graph_client import GRAPH_BASE_URL
 from i18n import add_language_argument, detect_language, t
 from launch_secure import load_secrets
 
-GRAPH_DEBUG_URL = "https://graph.facebook.com/v24.0/debug_token"
+GRAPH_DEBUG_URL = f"{GRAPH_BASE_URL}/debug_token"
 WARN_DAYS = 14
 SECONDS_PER_DAY = 86_400
 REQUEST_TIMEOUT = 15.0
