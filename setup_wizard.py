@@ -9,7 +9,7 @@ import argparse
 import json
 import os
 import platform
-import shutil
+import re
 import subprocess
 import sys
 import textwrap
@@ -22,12 +22,14 @@ from i18n import LANGUAGES, add_language_argument, detect_language, t
 
 ROOT = Path(__file__).resolve().parent
 SERVER_NAME = "meta-ads"
-MIN_PYTHON = (3, 10)
+MIN_PYTHON = (3, 11)  # starlette in requirements.lock needs 3.11+
 TOTAL_STEPS = 7
 DEFAULT_DAILY_LIMIT = 250
 DEFAULT_LIFETIME_LIMIT = 5000
 APP_ID_LENGTH = (5, 20)
 SECRET_ENV_KEYS = ("META_ACCESS_TOKEN", "META_APP_SECRET")
+REDACTED = "***removed-by-setup-wizard***"
+DIGITS = re.compile(r"[0-9]+", re.ASCII)
 WRAP_WIDTH = 88
 EXIT_OK, EXIT_FAILED, EXIT_ABORTED = 0, 1, 130
 
@@ -85,12 +87,38 @@ def is_valid_domain_list(value):
     return True
 
 
+def is_valid_config(config):
+    """A Claude Desktop config is an object whose mcpServers (if present) map names to objects."""
+    if not isinstance(config, dict):
+        return False
+    servers = config.get("mcpServers", {})
+    return isinstance(servers, dict) and all(
+        isinstance(server, dict) and isinstance(server.get("env", {}), dict) for server in servers.values()
+    )
+
+
 def _has_secrets(server):
     return any(key in server.get("env", {}) for key in SECRET_ENV_KEYS)
 
 
 def contains_plaintext_secrets(config):
     return any(_has_secrets(server) for server in config.get("mcpServers", {}).values())
+
+
+def redacted_config(config):
+    """Copy of the config with Meta credentials replaced; other entries stay as they are."""
+    def redact(server):
+        env = {key: REDACTED if key in SECRET_ENV_KEYS else value for key, value in server.get("env", {}).items()}
+        return {**server, "env": env} if "env" in server else server
+
+    servers = {name: redact(server) for name, server in config.get("mcpServers", {}).items()}
+    return {**config, "mcpServers": servers} if "mcpServers" in config else config
+
+
+def _write_atomic(path, text):
+    temporary = path.with_name(f"{path.name}.tmp-wizard")
+    temporary.write_text(text, encoding="utf-8")
+    os.replace(temporary, path)
 
 
 def legacy_entries(config):
@@ -103,15 +131,22 @@ def updated_config(config, entry, remove=()):
     return {**config, "mcpServers": {**servers, SERVER_NAME: entry}}
 
 
-def save_config(path, new_config, timestamp):
-    """Writes the config after copying the old file aside; returns the backup path or None."""
+def save_config(path, old_config, new_config, timestamp):
+    """Backs up the old config without Meta credentials, then replaces the file atomically.
+
+    Returns the backup path, or None if there was no previous file.
+    """
     backup = None
     if path.exists():
         backup = path.with_name(f"{path.name}.bak-{timestamp:%Y%m%d-%H%M%S}")
-        shutil.copy2(path, backup)
+        _write_atomic(backup, json.dumps(redacted_config(old_config), indent=2, ensure_ascii=False))
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(new_config, indent=2, ensure_ascii=False), encoding="utf-8")
+    _write_atomic(path, json.dumps(new_config, indent=2, ensure_ascii=False))
     return backup
+
+
+def is_positive_number(value):
+    return bool(DIGITS.fullmatch(value)) and int(value) > 0
 
 
 class TerminalConsole:
@@ -259,7 +294,7 @@ class Wizard:
         self._paragraph("app_intro")
         self._say("app_hint")
         low, high = APP_ID_LENGTH
-        self.app_id = self._ask_value("ask_app_id", None, lambda v: v.isdigit() and low <= len(v) <= high, "err_app_id")
+        self.app_id = self._ask_value("ask_app_id", None, lambda v: bool(DIGITS.fullmatch(v)) and low <= len(v) <= high, "err_app_id")
         account = self._ask_value("ask_default_account", "", is_valid_account_id, "err_default_account")
         self.default_account = settings.parse_account_id(account)
         self.instagram = self._confirm("ask_enable_instagram", default=False)
@@ -302,9 +337,8 @@ class Wizard:
     def ask_limits(self):
         self._heading(6, "step_limits")
         self._paragraph("limits_intro")
-        is_positive = lambda v: v.isdigit() and int(v) > 0
-        daily = self._ask_value("ask_daily", DEFAULT_DAILY_LIMIT, is_positive, "err_amount")
-        lifetime = self._ask_value("ask_lifetime", DEFAULT_LIFETIME_LIMIT, is_positive, "err_amount")
+        daily = self._ask_value("ask_daily", DEFAULT_DAILY_LIMIT, is_positive_number, "err_amount")
+        lifetime = self._ask_value("ask_lifetime", DEFAULT_LIFETIME_LIMIT, is_positive_number, "err_amount")
         self.limits = (int(daily), int(lifetime))
         domains = self._ask_value("ask_domains", "", is_valid_domain_list, "err_domains")
         self.allowed_domains = ",".join(sorted(url_policy.parse_domains(domains)))
@@ -321,7 +355,9 @@ class Wizard:
         self._say("claude_config_path", path=self.config_path)
         try:
             config = json.loads(self.config_path.read_text(encoding="utf-8")) if self.config_path.exists() else {}
-        except json.JSONDecodeError:
+            if not is_valid_config(config):
+                raise ValueError("unexpected structure")
+        except ValueError:  # includes json.JSONDecodeError
             self._error("err_config_json")
             self._json({"mcpServers": {SERVER_NAME: entry}})
             return True
@@ -333,7 +369,7 @@ class Wizard:
         if not self._confirm("ask_write_config"):
             self._say("skip_config")
             return True
-        backup = save_config(self.config_path, updated_config(config, entry, remove), self.now())
+        backup = save_config(self.config_path, config, updated_config(config, entry, remove), self.now())
         self._ok("ok_config")
         if backup:
             self._say("config_backup", path=backup)

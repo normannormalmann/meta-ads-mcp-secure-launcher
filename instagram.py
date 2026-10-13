@@ -6,11 +6,11 @@ instagram_basic, instagram_manage_insights, pages_read_engagement, pages_show_li
 Insights are organic only (ad interactions are not counted), can be delayed up
 to 48 h and are kept up to 2 years. Media in albums have no insights.
 """
-import json
 import re
 from datetime import datetime, timezone
 
 from graph_client import GraphError, parse_graph_time
+from tool_output import clamp, error_text, json_text
 
 REEL_METRICS = ("reach", "views", "likes", "comments", "shares", "saved", "total_interactions",
                 "ig_reels_avg_watch_time", "reposts")
@@ -20,23 +20,11 @@ DEFAULT_REELS_LIMIT = 25
 MAX_REELS_LIMIT = 100
 DEFAULT_PUBLIC_LIMIT = 12
 MAX_PUBLIC_LIMIT = 50
-NUMERIC_ID = re.compile(r"\d{5,25}")
-USERNAME = re.compile(r"[A-Za-z0-9._]{1,30}")  # Instagram username charset; blocks field-expansion injection
+NUMERIC_ID = re.compile(r"[0-9]{5,25}", re.ASCII)
+USERNAME = re.compile(r"[A-Za-z0-9._]{1,30}", re.ASCII)  # Instagram username charset; blocks field-expansion injection
 TOOL_NAMES = ("get_instagram_accounts", "get_instagram_reels", "get_instagram_reel_insights", "get_instagram_public_media")
 ORGANIC_NOTE = ("Organic values only: interactions from ads are not counted. Data can be delayed up to 48 hours; "
                 "missing metrics are null, not 0. ig_reels_avg_watch_time is in milliseconds.")
-
-
-def _json(value):
-    return json.dumps(value, indent=2, ensure_ascii=False)
-
-
-def _error(message):
-    return _json({"error": message})
-
-
-def _clamp(value, maximum):
-    return max(1, min(int(value), maximum))
 
 
 def make_accounts_tool(client_factory):
@@ -45,13 +33,13 @@ def make_accounts_tool(client_factory):
         try:
             pages = await client_factory().get_all("me/accounts", {"fields": "id,name,instagram_business_account{id,username,name}"})
         except GraphError as err:
-            return _error(str(err))
+            return error_text(str(err))
         accounts = [
             {"page_id": page["id"], "page_name": page.get("name"), "ig_user_id": page["instagram_business_account"]["id"],
              "ig_username": page["instagram_business_account"].get("username")}
             for page in pages if page.get("instagram_business_account")
         ]
-        return _json({"accounts": accounts})
+        return json_text({"accounts": accounts})
 
     return get_instagram_accounts
 
@@ -74,6 +62,21 @@ def _parse_since(since):
         raise ValueError(f"Invalid since {since!r}; expected YYYY-MM-DD.") from None
 
 
+async def _collect_reels(client, ig_user, cutoff, wanted):
+    """Newest-first Reels; stopped_by is 'limit', 'since' or 'end' (no more pages or page cap)."""
+    reels = []
+    async for page in client.iter_pages(f"{ig_user}/media", {"fields": MEDIA_FIELDS}):
+        for item in page:
+            published = parse_graph_time(item.get("timestamp"))
+            if cutoff and published and published < cutoff:
+                return reels, "since"
+            if item.get("media_product_type") == "REELS":
+                reels.append(item)
+                if len(reels) >= wanted:
+                    return reels, "limit"
+    return reels, "end"
+
+
 def make_reels_tool(client_factory, default_ig_user):
     async def get_instagram_reels(ig_user_id: str = "", limit: int = DEFAULT_REELS_LIMIT, since: str = "") -> str:
         """List organic Reels of an Instagram Business/Creator account, newest first.
@@ -85,25 +88,16 @@ def make_reels_tool(client_factory, default_ig_user):
         """
         ig_user, problem = _resolve_ig_user(ig_user_id, default_ig_user)
         if problem:
-            return _error(problem)
+            return error_text(problem)
         try:
-            cutoff = _parse_since(since)
-        except ValueError as err:
-            return _error(str(err))
-        wanted, reels = _clamp(limit, MAX_REELS_LIMIT), []
+            cutoff, wanted = _parse_since(since), clamp(limit, MAX_REELS_LIMIT)
+        except (TypeError, ValueError) as err:
+            return error_text(f"Invalid argument: {err}")
         try:
-            async for page in client_factory().iter_pages(f"{ig_user}/media", {"fields": MEDIA_FIELDS}):
-                for item in page:
-                    published = parse_graph_time(item.get("timestamp"))
-                    if cutoff and published and published < cutoff:
-                        return _json({"ig_user_id": ig_user, "reels": reels})
-                    if item.get("media_product_type") == "REELS":
-                        reels.append(item)
-                        if len(reels) >= wanted:
-                            return _json({"ig_user_id": ig_user, "reels": reels})
+            reels, stopped_by = await _collect_reels(client_factory(), ig_user, cutoff, wanted)
         except GraphError as err:
-            return _error(str(err))
-        return _json({"ig_user_id": ig_user, "reels": reels})
+            return error_text(str(err))
+        return json_text({"ig_user_id": ig_user, "reels": reels, "stopped_by": stopped_by})
 
     return get_instagram_reels
 
@@ -144,16 +138,16 @@ def make_insights_tool(client_factory):
             media_id: Numeric ID of the Reel (from get_instagram_reels).
         """
         if not NUMERIC_ID.fullmatch((media_id or "").strip()):
-            return _error(f"Invalid media_id {media_id!r}; expected the numeric media ID.")
+            return error_text(f"Invalid media_id {media_id!r}; expected the numeric media ID.")
         try:
             values, errors = await _fetch_metrics(client_factory(), media_id.strip())
         except GraphError as err:
-            return _error(str(err))
+            return error_text(str(err))
         result = {"media_id": media_id.strip(), "metrics": {metric: values.get(metric) for metric in REEL_METRICS},
                   "note": ORGANIC_NOTE}
         if errors:
             result["metric_errors"] = errors
-        return _json(result)
+        return json_text(result)
 
     return get_instagram_reel_insights
 
@@ -173,23 +167,27 @@ def make_public_media_tool(client_factory, default_ig_user):
             ig_user_id: Your own numeric Instagram user ID (optional if a default is configured).
         """
         if not USERNAME.fullmatch((username or "").strip().lstrip("@")):
-            return _error(f"Invalid username {username!r}; use letters, digits, '.' and '_' only.")
+            return error_text(f"Invalid username {username!r}; use letters, digits, '.' and '_' only.")
         own_user, problem = _resolve_ig_user(ig_user_id, default_ig_user)
         if problem:
-            return _error(problem)
-        name, count = username.strip().lstrip("@"), _clamp(limit, MAX_PUBLIC_LIMIT)
+            return error_text(problem)
+        try:
+            count = clamp(limit, MAX_PUBLIC_LIMIT)
+        except (TypeError, ValueError):
+            return error_text(f"Invalid limit {limit!r}; expected a whole number up to {MAX_PUBLIC_LIMIT}.")
+        name = username.strip().lstrip("@")
         fields = (f"business_discovery.username({name}){{username,name,followers_count,media_count,"
                   f"media.limit({count}){{{PUBLIC_MEDIA_FIELDS}}}}}")
         try:
             payload = await client_factory().get(own_user, {"fields": fields})
         except GraphError as err:
-            return _error(str(err))
+            return error_text(str(err))
         discovery = payload.get("business_discovery", {})
         items = discovery.get("media", {}).get("data", [])
         if only_reels:
             items = [item for item in items if item.get("media_product_type") == "REELS"]
         account = {key: value for key, value in discovery.items() if key != "media"}
-        return _json({"account": account, "media": items})
+        return json_text({"account": account, "media": items})
 
     return get_instagram_public_media
 

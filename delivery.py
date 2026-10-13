@@ -44,6 +44,9 @@ def classify(campaign, now):
     if start and start > now:
         return Delivery("SCHEDULED", "Campaign start_time is in the future.")
     if "adsets" in campaign:
+        if campaign["adsets"].get("paging", {}).get("next"):
+            return Delivery("ACTIVE", "Active and within its schedule; ad set list incomplete (over 100 ad sets), "
+                                       "so ad set end times were not evaluated.")
         ad_set_result = _ad_set_delivery(campaign["adsets"].get("data", []), now)
         if ad_set_result:
             return ad_set_result

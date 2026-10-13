@@ -4,8 +4,8 @@ import re
 ENV_DEFAULT_ACCOUNT = "META_DEFAULT_ACCOUNT_ID"
 ENV_ENABLE_INSTAGRAM = "META_ENABLE_INSTAGRAM_INSIGHTS"
 ENV_DEFAULT_IG_USER = "META_DEFAULT_IG_USER_ID"
-ACCOUNT_PATTERN = re.compile(r"(?:act_)?(\d+)")
-IG_USER_PATTERN = re.compile(r"\d{5,25}")
+ACCOUNT_PATTERN = re.compile(r"(?:act_)?([0-9]+)", re.ASCII)
+IG_USER_PATTERN = re.compile(r"[0-9]{5,25}", re.ASCII)
 TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
 
 

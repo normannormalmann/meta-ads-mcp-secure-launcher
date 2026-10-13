@@ -80,7 +80,7 @@ flowchart LR
 ## Voraussetzungen
 
 - **Windows 10/11** (der Starter nutzt den Windows-Anmeldeinformationsspeicher)
-- **Python 3.10 oder neuer**: [python.org](https://www.python.org/downloads/windows/)
+- **Python 3.11 oder neuer**: [python.org](https://www.python.org/downloads/windows/)
 - **Claude Desktop**: [claude.ai/download](https://claude.ai/download)
 - Eine **Meta-App** mit Marketing API und einem **Access-Token** dafür, am besten von einem Systemnutzer
 
@@ -126,7 +126,7 @@ Du legst das maximale Tages- und Laufzeitbudget fest. Der Assistent zeigt den ge
 
 1. Claude Desktop komplett beenden (Tray-Symbol → *Beenden*) und neu starten.
 2. In Claude Desktop unter *Einstellungen → Connectors → meta-ads* die `create_*`- und `update_*`-Tools sowie `upload_ad_image` und `create_budget_schedule` auf **„Immer fragen“** stellen.
-3. Falls der Assistent Zugangsdaten im Klartext in der Sicherung gemeldet hat: die Sicherung löschen, sobald alles läuft, und **alten Token und App-Secret erneuern**.
+3. Falls deine alte Konfiguration Meta-Token und App-Secret im Klartext enthielt: Der Assistent entfernt sie aus der Sicherung, die er schreibt (andere Einträge bleiben unverändert). **Erneuere alten Token und App-Secret** trotzdem, weil sie vorher im Klartext gespeichert waren.
 
 ## Manuelle Einrichtung
 
@@ -173,7 +173,7 @@ Setzt der Starter automatisch: `META_ADS_DISABLE_CALLBACK_SERVER=1` und `META_AD
 
 Die Zugangsdaten werden als *generische Anmeldeinformationen* mit den Namen `meta-ads-mcp/app_secret` und `meta-ads-mcp/access_token` gespeichert. Du findest sie unter *Systemsteuerung → Anmeldeinformationsverwaltung → Windows-Anmeldeinformationen*. `store_secrets.py --status` zeigt, ob sie vorhanden sind, ohne die Werte anzuzeigen.
 
-Logdatei: `%APPDATA%\meta-ads-mcp\meta_ads_debug.log` (+ `.1` bis `.3`).
+Logdatei: `%APPDATA%\meta-ads-mcp\meta_ads_debug.log` (+ `.1` bis `.3`). Der Starter begrenzt das Log auf INFO; `META_ADS_LOG_LEVEL=DEBUG` aus dem Originalpaket wirkt nicht.
 
 ## Schreibschutz
 
@@ -184,13 +184,16 @@ Logdatei: `%APPDATA%\meta-ads-mcp\meta_ads_debug.log` (+ `.1` bis `.3`).
 | Tagesbudget | `daily_budget`, `daily_spend_cap`, `daily_min_spend_target` über `META_GUARD_MAX_DAILY_BUDGET` |
 | Laufzeitbudget | `lifetime_budget`, `spend_cap`, `lifetime_spend_cap`, `lifetime_min_spend_target` über `META_GUARD_MAX_LIFETIME_BUDGET` |
 | Budget-Zeitpläne | `ABSOLUTE`-Erhöhungen über dem Tageslimit, `MULTIPLIER` über 2 |
-| Unbekanntes Format | Schreibanfragen, deren Inhalt nicht formularkodiert ist (im Zweifel blockiert) |
+| Unbekanntes Format | Schreibanfragen, deren Inhalt nicht formularkodiert oder kein gültiges UTF-8 ist (im Zweifel blockiert) |
+| Eingeschleuste Anfragen | Graph-Pfade außer `/vXX.X/segment/...` (Buchstaben, Ziffern, `_`), die Parameter `method`, `_method`, `batch`, `include_headers`, `suppress_http_code` in Query oder Body und bei POST jeder Query-Parameter außer `access_token`/`appsecret_proof`. So kann ein Tool-Argument wie `123?method=delete` keinen harmlosen Aufruf in eine andere Operation verwandeln. |
 | Ziel-URLs | nur wenn `META_GUARD_ALLOWED_URL_DOMAINS` gesetzt ist: ein `link`, `website_url`, `template_url` oder `deeplink_url` (auch verschachtelt in `object_story_spec`/`asset_feed_spec`), das nicht `https` ist, außerhalb der erlaubten Domains liegt, auf eine IP-Adresse zeigt oder Zugangsdaten in der URL enthält. `display_url` und `url_tags` werden nicht geprüft. Nicht lesbare Angaben werden blockiert. |
 | Pipeboard | jede Anfrage an `mcp.pipeboard.co`, `meta-ads.mcp.pipeboard.co` oder den Host aus `PIPEBOARD_API_BASE_URL`, außer bei `META_GUARD_ALLOW_PIPEBOARD=1` |
 
 Ein blockierter Aufruf verlässt deinen Rechner nie. Claude bekommt eine Fehlermeldung im Graph-Format (`Blocked by local write guard: …`), und der Vorgang wird als Warnung protokolliert.
 
-**Grenzen:** Der Schreibschutz prüft einzelne Anfragen. Kontoweite Summen setzt er nicht durch (viele Kampagnen jeweils am Limit sind möglich), und `bid_amount`/`bid_cap` begrenzt er nicht. Kombiniere ihn mit „Immer fragen“ in Claude Desktop und am besten mit einem Ausgabenlimit für das Werbekonto bei Meta.
+Budget- und Status-Regeln prüfen **jeden** Wert eines Schlüssels (auch doppelte in Query und Body) und auch Schlüssel, die in JSON-Feldern wie `adset_budgets` verschachtelt sind. Beträge müssen einfache ganze Zahlen sein.
+
+**Grenzen:** Der Schreibschutz prüft einzelne Anfragen. Kontoweite Summen setzt er nicht durch (viele Kampagnen jeweils am Limit sind möglich), und `bid_amount`/`bid_cap` begrenzt er nicht. Kombiniere ihn mit „Immer fragen“ in Claude Desktop und am besten mit einem Ausgabenlimit für das Werbekonto bei Meta. Grenzen werden als Betrag × 100 in der kleinsten Währungseinheit ausgewertet. Für EUR/USD passt das, bei Währungen ohne Untereinheit (z.B. JPY, KRW) ist die Grenze 100-mal großzügiger – dort niedrigere Werte setzen.
 
 Die Pipeboard-Regel ist eine zusätzliche Absicherung: Die optionalen `duplicate_*`-Tools von `meta-ads-mcp` schicken Kampagnendaten an die Server von Pipeboard. Mit Claude Desktop (stdio) brechen sie derzeit vorher ab, weil sie einen Pipeboard-Token in einem HTTP-Header erwarten. Die Regel stellt sicher, dass die Daten auch dann lokal bleiben, wenn sich das ändert.
 
@@ -288,6 +291,8 @@ Prüfe das Ergebnis mit [`pip-audit`](https://pypi.org/project/pip-audit/) (`pip
 
 - **Schützt vor:** Zugangsdaten in Konfigurationsdateien, Backups und Support-Uploads; Tokens in Logdateien; versehentlichen oder eingeschleusten zerstörerischen Schreibaufrufen; Anzeigen-Links, die auf fremde Domains umgeleitet werden (mit erlaubten Ziel-Domains); Kampagnendaten, die an Server Dritter gehen; unnötigen lokalen Netzwerkdiensten.
 - **Schützt nicht vor:** Schadsoftware, die unter deinem Windows-Konto läuft. Sie kann den Anmeldeinformationsspeicher genauso lesen wie der Starter. Auch nicht vor Änderungen, die du selbst bestätigst, und nicht vor allem, was die Meta-Rechte des Tokens außerhalb von `meta-ads-mcp` erlauben.
+- Jedes Programm, das unter deinem Windows-Konto läuft, kann die Zugangsdaten aus dem Anmeldeinformationsspeicher lesen (es gibt keinen Schutz pro Anwendung). Der Starter schützt vor Dateien, Sicherungen und Logs, nicht vor lokaler Schadsoftware.
+- Der Schreibschutz ist ein Sicherheitsnetz gegen Fehler und Prompt-Injection, keine Sandbox: Ob eine erlaubte Änderung geschäftlich sinnvoll ist, kann er nicht beurteilen. Lass „Immer fragen“ für Schreib-Tools eingeschaltet.
 - Der Schreibschutz funktioniert über eine Hülle um `httpx`. Nutzt eine künftige Upstream-Version einen anderen HTTP-Client, greift er nicht mehr. Dafür gibt es die festen Versionen und den Selbsttest.
 - Nur für Windows.
 

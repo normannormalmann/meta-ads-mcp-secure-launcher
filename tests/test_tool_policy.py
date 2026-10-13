@@ -85,3 +85,12 @@ def test_result_size_limits_respect_claude_code_ceiling():
 
 def test_every_category_is_known():
     assert set(tool_policy.TOOL_CATEGORIES.values()) <= set(tool_policy.CATEGORY_ANNOTATIONS)
+
+
+def test_tools_get_independent_annotation_objects():
+    server = make_server("get_ads", "get_adsets")
+    tool_policy.apply(server)
+    tools = listed_tools(server)
+
+    assert tools["get_ads"].annotations == tools["get_adsets"].annotations
+    assert tools["get_ads"].annotations is not tool_policy.CATEGORY_ANNOTATIONS[tool_policy.READ]

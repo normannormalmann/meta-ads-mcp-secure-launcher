@@ -80,7 +80,7 @@ flowchart LR
 ## Requirements
 
 - **Windows 10/11** (the launcher uses the Windows Credential Manager)
-- **Python 3.10 or newer** – [python.org](https://www.python.org/downloads/windows/)
+- **Python 3.11 or newer** – [python.org](https://www.python.org/downloads/windows/)
 - **Claude Desktop** – [claude.ai/download](https://claude.ai/download)
 - A **Meta app** with the Marketing API and an **access token** for it, preferably from a system user
 
@@ -126,7 +126,7 @@ You set the maximum daily and lifetime budget. The wizard shows the exact entry 
 
 1. Quit Claude Desktop completely (tray icon → *Quit*) and start it again.
 2. In Claude Desktop under *Settings → Connectors → meta-ads*, set the `create_*` and `update_*` tools as well as `upload_ad_image` and `create_budget_schedule` to **"Always ask"**.
-3. If the wizard reported plain-text credentials in the backup: delete the backup once everything works, and **rotate the old token and app secret**.
+3. If your old configuration contained the Meta token and app secret in plain text: the wizard removes them from the backup it writes (other entries stay unchanged). **Rotate the old token and app secret** anyway, since they were stored in plain text before.
 
 ## Manual setup
 
@@ -173,7 +173,7 @@ Set automatically by the launcher: `META_ADS_DISABLE_CALLBACK_SERVER=1` and `MET
 
 The credentials are stored as *generic credentials* named `meta-ads-mcp/app_secret` and `meta-ads-mcp/access_token`. You can see them under *Control Panel → Credential Manager → Windows Credentials*. `store_secrets.py --status` shows whether they exist, without showing the values.
 
-Log file: `%APPDATA%\meta-ads-mcp\meta_ads_debug.log` (+ `.1` to `.3`).
+Log file: `%APPDATA%\meta-ads-mcp\meta_ads_debug.log` (+ `.1` to `.3`). The log is capped at INFO by the launcher; `META_ADS_LOG_LEVEL=DEBUG` from upstream has no effect.
 
 ## Write guard
 
@@ -184,13 +184,16 @@ Log file: `%APPDATA%\meta-ads-mcp\meta_ads_debug.log` (+ `.1` to `.3`).
 | Daily budget | `daily_budget`, `daily_spend_cap`, `daily_min_spend_target` above `META_GUARD_MAX_DAILY_BUDGET` |
 | Lifetime budget | `lifetime_budget`, `spend_cap`, `lifetime_spend_cap`, `lifetime_min_spend_target` above `META_GUARD_MAX_LIFETIME_BUDGET` |
 | Budget schedules | `ABSOLUTE` increases above the daily limit, `MULTIPLIER` above 2 |
-| Unknown format | write requests whose body is not form-encoded (fail-closed) |
+| Unknown format | write requests whose body is not form-encoded or not valid UTF-8 (fail-closed) |
+| Request smuggling | Graph paths other than `/vXX.X/segment/...` (letters, digits, `_`), the parameters `method`, `_method`, `batch`, `include_headers`, `suppress_http_code` in query or body, and any query parameter on POST except `access_token`/`appsecret_proof`. This stops tool arguments like `123?method=delete` from turning a harmless call into a different operation. |
 | Destinations | only if `META_GUARD_ALLOWED_URL_DOMAINS` is set: a `link`, `website_url`, `template_url` or `deeplink_url` (also nested in `object_story_spec`/`asset_feed_spec`) that is not `https`, points outside the allowed domains or to an IP address, or contains user info. `display_url` and `url_tags` are not checked. Unparseable specs are blocked. |
 | Pipeboard | any request to `mcp.pipeboard.co`, `meta-ads.mcp.pipeboard.co` or the host in `PIPEBOARD_API_BASE_URL`, unless `META_GUARD_ALLOW_PIPEBOARD=1` |
 
 A blocked call never leaves your machine. Claude receives a Graph-style error (`Blocked by local write guard: …`), and the event is logged as a warning.
 
-**Limits:** the guard checks single requests. It does not enforce account-wide totals (many campaigns at the limit are still possible), and it does not limit `bid_amount`/`bid_cap`. Combine it with *"Always ask"* in Claude Desktop and, ideally, a spending limit on the ad account in Meta.
+Budget and status rules check **every** value of a key (duplicates in query and body) and also keys nested in JSON fields such as `adset_budgets`. Amounts must be plain whole numbers.
+
+**Limits:** the guard checks single requests. It does not enforce account-wide totals (many campaigns at the limit are still possible), and it does not limit `bid_amount`/`bid_cap`. Combine it with *"Always ask"* in Claude Desktop and, ideally, a spending limit on the ad account in Meta. Limits are interpreted as amount × 100 in the smallest currency unit, which is correct for EUR/USD but 100× more generous for currencies without minor units (e.g. JPY, KRW) – set lower values there.
 
 The Pipeboard rule is defence in depth: the optional `duplicate_*` tools of `meta-ads-mcp` send campaign data to Pipeboard's servers. With Claude Desktop (stdio) they currently stop earlier, because they expect a Pipeboard token in an HTTP header. The rule makes sure the data stays local if that changes.
 
@@ -288,6 +291,8 @@ Check the result with [`pip-audit`](https://pypi.org/project/pip-audit/) (`pip-a
 
 - **Protects against:** credentials in config files, backups and support uploads; tokens in log files; accidental or injected destructive write calls; ad links redirected to foreign domains (with the allowlist); campaign data sent to third-party servers; unnecessary local network services.
 - **Does not protect against:** malware running under your Windows account. It can read the Credential Manager just like the launcher. It also does not protect against changes you approve yourself, or against everything the Meta permissions of the token allow outside of `meta-ads-mcp`.
+- Any program running under your Windows account can read the credentials from the Credential Manager (there is no per-application protection). The launcher's protection is against files, backups and logs, not against local malware.
+- The write guard is a safety net against mistakes and prompt injection, not a sandbox: it cannot judge whether an allowed change makes business sense. Keep *"Always ask"* enabled for write tools.
 - The write guard works by wrapping `httpx`. A future upstream version that uses another HTTP client would bypass it. Pinned versions and the self-test exist for that reason.
 - Windows only.
 

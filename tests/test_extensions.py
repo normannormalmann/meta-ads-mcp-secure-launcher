@@ -6,6 +6,7 @@ import pytest
 from mcp.server.fastmcp import FastMCP
 
 import extensions
+import settings
 import tool_policy
 
 NOW = datetime(2026, 10, 13, 12, 0, tzinfo=timezone.utc)
@@ -17,7 +18,7 @@ class FakeClient:
         self.error = error
         self.calls = []
 
-    async def get_all(self, path, params=None, max_items=None):
+    async def get_all(self, path, params=None, max_items=None, page_size=None):
         self.calls.append((path, params, max_items))
         if self.error:
             raise self.error
@@ -30,13 +31,13 @@ def call(tool, **arguments):
 
 @pytest.mark.parametrize("raw, expected", [("act_123456", "act_123456"), ("123456", "act_123456"), (" act_42 ", "act_42"), ("", None), (None, None)])
 def test_parse_account_id(raw, expected):
-    assert extensions.parse_account_id(raw) == expected
+    assert settings.parse_account_id(raw) == expected
 
 
 @pytest.mark.parametrize("raw", ["act_", "act_12a", "account 1", "act_1;drop"])
 def test_parse_account_id_rejects_invalid(raw):
     with pytest.raises(ValueError, match="META_DEFAULT_ACCOUNT_ID"):
-        extensions.parse_account_id(raw)
+        settings.parse_account_id(raw)
 
 
 def test_delivery_tool_uses_default_account_and_requests_needed_fields():
@@ -48,7 +49,7 @@ def test_delivery_tool_uses_default_account_and_requests_needed_fields():
     [(path, params, max_items)] = client.calls
     assert path == "act_9/campaigns"
     assert "effective_status" in params["fields"] and "stop_time" in params["fields"] and "adsets" in params["fields"]
-    assert max_items == extensions.DEFAULT_CAMPAIGN_LIMIT
+    assert max_items == extensions.DEFAULT_CAMPAIGN_LIMIT + 1  # one extra to detect truncation
     assert result["account_id"] == "act_9"
     assert result["counts"] == {"ACTIVE": 1}
 
@@ -60,7 +61,7 @@ def test_delivery_tool_explicit_account_wins_and_is_normalized():
     call(tool, account_id="777", limit=5)
 
     assert client.calls[0][0] == "act_777/campaigns"
-    assert client.calls[0][2] == 5
+    assert client.calls[0][2] == 6
 
 
 def test_delivery_tool_without_any_account_returns_error():
@@ -83,7 +84,7 @@ def test_delivery_tool_caps_limit():
 
     call(tool, limit=10_000)
 
-    assert client.calls[0][2] == extensions.MAX_CAMPAIGN_LIMIT
+    assert client.calls[0][2] == extensions.MAX_CAMPAIGN_LIMIT + 1
 
 
 def test_register_adds_read_only_tool_and_default_account_instructions():
@@ -122,3 +123,27 @@ def test_launcher_tools_are_classified_and_do_not_clash_with_upstream():
     launcher_tools = set(extensions.TOOL_NAMES) | set(instagram.TOOL_NAMES)
     assert launcher_tools == set(tool_policy.LAUNCHER_TOOL_CATEGORIES)
     assert not launcher_tools & upstream_scan.registered_tool_names()
+
+
+def test_delivery_flags_truncated_results():
+    client = FakeClient([{"id": str(i), "effective_status": "PAUSED"} for i in range(6)])
+    tool = extensions.make_campaign_delivery_tool(lambda: client, "act_9", lambda: NOW)
+
+    result = call(tool, limit=5)
+
+    assert result["truncated"] is True
+    assert result["fetched"] == 5
+    assert client.calls[0][2] == 6  # asks for one more to detect truncation
+
+
+def test_delivery_not_truncated_when_all_fit():
+    client = FakeClient([{"id": "1", "effective_status": "PAUSED"}])
+    result = call(extensions.make_campaign_delivery_tool(lambda: client, "act_9", lambda: NOW), limit=5)
+
+    assert result["truncated"] is False
+
+
+def test_delivery_handles_invalid_limit():
+    tool = extensions.make_campaign_delivery_tool(lambda: FakeClient(), "act_9", lambda: NOW)
+
+    assert "limit" in call(tool, limit="many")["error"]

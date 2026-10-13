@@ -45,3 +45,33 @@ def test_invalid_default_ig_user_stops_start(capsys):
         launch_secure.check_extension_config({"META_DEFAULT_IG_USER_ID": "@brand"})
 
     assert "META_DEFAULT_IG_USER_ID" in capsys.readouterr().err
+
+
+def test_credential_read_errors_stop_with_clean_message(capsys):
+    def broken(target):
+        raise launch_secure.CredentialReadError("Windows error 5")
+
+    with pytest.raises(SystemExit) as exc:
+        launch_secure.load_secrets(broken)
+
+    assert exc.value.code == 1
+    assert "Windows error 5" in capsys.readouterr().err
+
+
+def test_read_secrets_raises_instead_of_exiting():
+    with pytest.raises(launch_secure.CredentialsMissing) as exc:
+        launch_secure.read_secrets(lambda target: None)
+
+    assert "META_ACCESS_TOKEN" in str(exc.value)
+
+
+def test_unsupported_upstream_stops_with_hint(monkeypatch, capsys):
+    import sys
+
+    monkeypatch.setitem(sys.modules, "meta_ads_mcp", None)  # import raises ImportError
+
+    with pytest.raises(SystemExit) as exc:
+        launch_secure.wire_upstream(log_handler=None, environ={})
+
+    assert exc.value.code == 1
+    assert "meta-ads-mcp" in capsys.readouterr().err

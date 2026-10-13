@@ -77,7 +77,7 @@ def apply(server):
         if category is None:
             unknown.append(tool.name)
             category = MODIFY
-        tool.annotations = CATEGORY_ANNOTATIONS[category]
+        tool.annotations = CATEGORY_ANNOTATIONS[category].model_copy()
         if tool.name in RESULT_SIZE_LIMITS:
             tool.meta = {**(tool.meta or {}), MAX_RESULT_SIZE_KEY: RESULT_SIZE_LIMITS[tool.name]}
     if unknown:

@@ -32,7 +32,8 @@ def test_get_sends_token_and_appsecret_proof():
     expected_proof = hmac.new(SECRET.encode(), FAKE_TOKEN.encode(), hashlib.sha256).hexdigest()
     assert request.url.host == "graph.facebook.com"
     assert request.url.path == f"/{graph_client.GRAPH_API_VERSION}/act_1"
-    assert request.url.params["access_token"] == FAKE_TOKEN
+    assert request.headers["authorization"] == f"Bearer {FAKE_TOKEN}"
+    assert "access_token" not in request.url.params  # token never appears in a URL
     assert request.url.params["appsecret_proof"] == expected_proof
     assert request.url.params["fields"] == "id"
 
@@ -119,3 +120,9 @@ def test_iter_pages_yields_each_page():
         return [page async for page in client.iter_pages("x/media", page_size=1)]
 
     assert run(collect()) == [[{"id": "1"}], [{"id": "2"}]]
+
+
+@pytest.mark.parametrize("payload", [["not", "a", "dict"], {"error": "plain string"}, {"error": ["x"]}])
+def test_unexpected_payload_shapes_raise_graph_error(payload):
+    with pytest.raises(graph_client.GraphError):
+        run(client_with(lambda r: httpx.Response(200, json=payload)).get("act_1"))

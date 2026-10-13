@@ -208,3 +208,18 @@ def test_extensions_register_instagram_only_when_enabled():
 
     assert not {t.name for t in disabled._tool_manager.list_tools()} & set(instagram.TOOL_NAMES)
     assert set(instagram.TOOL_NAMES) <= {t.name for t in enabled._tool_manager.list_tools()}
+
+
+def test_reels_report_why_they_stopped():
+    pages = {f"{IG}/media": [[media(str(i), "REELS") for i in range(5)]]}
+
+    assert call(instagram.make_reels_tool(lambda: FakeClient(pages=pages), IG), limit=2)["stopped_by"] == "limit"
+    assert call(instagram.make_reels_tool(lambda: FakeClient(pages=pages), IG), limit=50)["stopped_by"] == "end"
+
+
+@pytest.mark.parametrize("raw", ["１２３４５６", "١٢٣٤٥٦"])
+def test_non_ascii_digits_are_rejected(raw):
+    with pytest.raises(ValueError):
+        settings.parse_ig_user_id(raw)
+    with pytest.raises(ValueError):
+        settings.parse_account_id(raw)

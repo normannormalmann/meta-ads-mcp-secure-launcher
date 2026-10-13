@@ -3,20 +3,26 @@
 Hooks httpx.AsyncClient.send, which every Graph API and Pipeboard request of
 meta-ads-mcp passes through (asserted by tests/test_upstream_invariants.py), and
 rejects:
-- writes that exceed budget limits or would delete or archive objects,
+- Graph requests with unexpected paths or request-override parameters
+  (method, batch, ...), which could smuggle a different operation past the rules,
+- writes that exceed budget limits or would delete or archive objects, checked
+  for every value of a key and inside JSON-encoded fields,
 - ad destinations outside the allowed domains (if configured, see url_policy),
 - any request to Pipeboard servers unless explicitly allowed.
 Blocked calls never leave the machine; Claude receives a Graph-style error
-explaining the rule. Budget limits apply per request/object, in the ad account
-currency.
+explaining the rule. Budget limits apply per object, in the ad account currency.
 """
 import json
 import logging
+import math
+import re
 from dataclasses import dataclass
-from urllib.parse import parse_qsl, urlsplit
+from urllib.parse import urlsplit
 
 import httpx
 
+import form_fields
+import settings
 import url_policy
 
 ENV_MAX_DAILY = "META_GUARD_MAX_DAILY_BUDGET"
@@ -24,7 +30,6 @@ ENV_MAX_LIFETIME = "META_GUARD_MAX_LIFETIME_BUDGET"
 ENV_ALLOW_PIPEBOARD = "META_GUARD_ALLOW_PIPEBOARD"
 ENV_PIPEBOARD_BASE_URL = "PIPEBOARD_API_BASE_URL"
 CENTS_PER_UNIT = 100
-TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
 PIPEBOARD_HOSTS = frozenset({"mcp.pipeboard.co", "meta-ads.mcp.pipeboard.co"})
 
 
@@ -40,12 +45,15 @@ class Policy:
 DEFAULT_POLICY = Policy(max_daily_cents=250 * CENTS_PER_UNIT, max_lifetime_cents=5_000 * CENTS_PER_UNIT)
 BLOCKED_STATUSES = frozenset({"DELETED", "ARCHIVED"})
 
-GRAPH_HOSTS = frozenset({"graph.facebook.com"})
+GRAPH_HOSTS = frozenset({"graph.facebook.com", "graph-video.facebook.com"})
+GRAPH_PATH = re.compile(r"/v\d+\.\d+(/[A-Za-z0-9_]+)*/?", re.ASCII)
+OVERRIDE_KEYS = frozenset({"method", "_method", "batch", "include_headers", "suppress_http_code"})
+AUTH_QUERY_KEYS = frozenset({"access_token", "appsecret_proof"})
 WRITE_METHODS = frozenset({"POST", "PUT"})
-DAILY_FIELDS = ("daily_budget", "daily_spend_cap", "daily_min_spend_target")
-LIFETIME_FIELDS = ("lifetime_budget", "spend_cap", "lifetime_spend_cap", "lifetime_min_spend_target")
-STATUS_FIELDS = ("status", "configured_status")
-FORM_CONTENT_TYPE = "application/x-www-form-urlencoded"
+DAILY_FIELDS = frozenset({"daily_budget", "daily_spend_cap", "daily_min_spend_target"})
+LIFETIME_FIELDS = frozenset({"lifetime_budget", "spend_cap", "lifetime_spend_cap", "lifetime_min_spend_target"})
+STATUS_FIELDS = frozenset({"status", "configured_status"})
+CENTS = re.compile(r"-?[0-9]+", re.ASCII)
 
 logger = logging.getLogger("meta-ads-mcp.write-guard")
 _original_send = None
@@ -59,14 +67,14 @@ def _limit_cents(environ, name, default_cents):
     try:
         amount = float(raw)
     except ValueError:
-        amount = 0
-    if amount <= 0:
+        amount = math.nan
+    if not math.isfinite(amount) or amount <= 0:
         raise ValueError(f"{name} must be a positive amount in account currency, got '{raw}'.")
     return round(amount * CENTS_PER_UNIT)
 
 
 def _blocked_hosts(environ):
-    if environ.get(ENV_ALLOW_PIPEBOARD, "").strip().lower() in TRUE_VALUES:
+    if settings.is_enabled(environ.get(ENV_ALLOW_PIPEBOARD)):
         return frozenset()
     custom_host = urlsplit(environ.get(ENV_PIPEBOARD_BASE_URL, "")).hostname
     return PIPEBOARD_HOSTS | ({custom_host.lower()} if custom_host else set())
@@ -86,50 +94,68 @@ def _units(cents):
     return f"{cents / CENTS_PER_UNIT:.2f}"
 
 
-def _request_fields(request):
-    """Returns query + form fields, or None if the body format is unknown."""
-    fields = dict(request.url.params)
-    body = request.read()
-    if not body:
-        return fields
-    if not request.headers.get("content-type", "").startswith(FORM_CONTENT_TYPE):
+def _cents(value):
+    """Amount in cents from a form string or JSON number; None if not a plain integer."""
+    if isinstance(value, bool):
         return None
-    return {**fields, **dict(parse_qsl(body.decode("utf-8"), keep_blank_values=True))}
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value) if math.isfinite(value) and value.is_integer() else None
+    text = str(value).strip()
+    return int(text) if CENTS.fullmatch(text) else None
 
 
-def _check_amount(fields, names, limit_cents):
-    for name in names:
-        if name not in fields:
+def _check_amounts(pairs, policy):
+    for key, value in pairs:
+        limit = policy.max_daily_cents if key in DAILY_FIELDS else policy.max_lifetime_cents if key in LIFETIME_FIELDS else None
+        if limit is None:
             continue
-        try:
-            amount = int(fields[name])
-        except ValueError:
-            return f"{name}='{fields[name]}' is not a valid amount in cents."
-        if amount > limit_cents:
-            return f"{name} {_units(amount)} exceeds the limit of {_units(limit_cents)} (account currency)."
+        amount = _cents(value)
+        if amount is None:
+            return f"{key}='{value}' is not a valid amount in cents."
+        if amount > limit:
+            return f"{key} {_units(amount)} exceeds the limit of {_units(limit)} (account currency)."
     return None
 
 
-def _check_status(fields):
-    for name in STATUS_FIELDS:
-        status = str(fields.get(name, "")).upper()
-        if status in BLOCKED_STATUSES:
+def _check_statuses(pairs):
+    for key, value in pairs:
+        status = str(value).strip().upper()
+        if key in STATUS_FIELDS and status in BLOCKED_STATUSES:
             return f"Setting status {status} (delete/archive) is blocked. Please do this in Meta Ads Manager."
     return None
 
 
-def _check_budget_schedule(fields, policy):
-    value_type = str(fields.get("budget_value_type", "")).upper()
-    if "budget_value" not in fields or not value_type:
-        return None
-    if value_type == "ABSOLUTE":
-        return _check_amount(fields, ("budget_value",), policy.max_daily_cents)
-    try:
-        multiplier = float(fields["budget_value"])
-    except ValueError:
-        return f"budget_value='{fields['budget_value']}' is not a valid number."
-    if multiplier > policy.max_budget_multiplier:
-        return f"Budget multiplier {multiplier} exceeds the limit of {policy.max_budget_multiplier}."
+def _check_budget_schedules(pairs, policy):
+    value_types = {str(value).strip().upper() for key, value in pairs if key == "budget_value_type"}
+    for key, value in pairs:
+        if key != "budget_value":
+            continue
+        if "ABSOLUTE" in value_types or not value_types:
+            reason = _check_amounts([("daily_budget", value)], policy)
+            if reason:
+                return reason.replace("daily_budget", "budget_value", 1)
+        if "MULTIPLIER" in value_types:
+            try:
+                multiplier = float(value)
+            except (TypeError, ValueError):
+                multiplier = math.nan
+            if not math.isfinite(multiplier) or multiplier > policy.max_budget_multiplier:
+                return f"Budget multiplier '{value}' exceeds the limit of {policy.max_budget_multiplier}."
+    return None
+
+
+def _check_request_shape(request, pairs):
+    if not GRAPH_PATH.fullmatch(request.url.path):
+        return f"Unexpected Graph API path '{request.url.path[:80]}' - blocked for safety."
+    overrides = sorted({key for key, _ in pairs if key.lower() in OVERRIDE_KEYS})
+    if overrides:
+        return f"Request parameter(s) {', '.join(overrides)} not allowed: they could change the operation."
+    if request.method == "POST":
+        extra = sorted({key for key, _ in request.url.params.multi_items()} - AUTH_QUERY_KEYS)
+        if extra:
+            return f"Query parameter(s) {', '.join(extra)} not allowed on POST requests."
     return None
 
 
@@ -143,17 +169,18 @@ def check_request(request, policy=DEFAULT_POLICY):
         return None
     if request.method == "DELETE":
         return "Deleting via the API is blocked. Please do this in Meta Ads Manager."
-    if request.method not in WRITE_METHODS:
-        return None
-    fields = _request_fields(request)
-    if fields is None:
-        return "Unknown request format for a write call - blocked for safety."
+    pairs = form_fields.request_pairs(request)
+    if pairs is None:
+        return "Unknown or undecodable request format - blocked for safety."
+    reason = _check_request_shape(request, pairs)
+    if reason or request.method not in WRITE_METHODS:
+        return reason
+    expanded = form_fields.all_pairs(pairs)
     return (
-        _check_status(fields)
-        or _check_amount(fields, DAILY_FIELDS, policy.max_daily_cents)
-        or _check_amount(fields, LIFETIME_FIELDS, policy.max_lifetime_cents)
-        or _check_budget_schedule(fields, policy)
-        or url_policy.check_destinations(fields, policy.allowed_url_domains)
+        _check_statuses(expanded)
+        or _check_amounts(expanded, policy)
+        or _check_budget_schedules(pairs, policy)
+        or url_policy.check_destinations(pairs, policy.allowed_url_domains)
     )
 
 

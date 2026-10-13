@@ -82,3 +82,12 @@ def test_summary_filters_by_status():
 
     assert [c["id"] for c in summary["campaigns"]] == ["1"]
     assert summary["counts"] == {"ACTIVE": 1, "COMPLETED": 1}
+
+
+def test_incomplete_ad_set_list_is_not_used_for_conclusions():
+    entry = campaign(adsets={"data": [{"end_time": PAST, "effective_status": "PAUSED"}], "paging": {"next": "https://x"}})
+
+    result = delivery.classify(entry, NOW)
+
+    assert result.status == "ACTIVE"
+    assert "incomplete" in result.reason

@@ -51,8 +51,13 @@ def test_happy_path_writes_entry_keeps_other_servers_and_removes_legacy(root, tm
     assert entry["args"] == [str(root / "launch_secure.py")]
     assert entry["env"] == {"META_APP_ID": APP_ID, "META_GUARD_MAX_DAILY_BUDGET": "250", "META_GUARD_MAX_LIFETIME_BUDGET": "5000"}
     backup = config_path.with_name("claude_desktop_config.json.bak-20261013-120000")
-    assert json.loads(backup.read_text(encoding="utf-8"))["mcpServers"]["meta-ads-mcp"] == LEGACY_ENTRY
-    assert "plain-text credentials" in console.text()
+    backed_up = json.loads(backup.read_text(encoding="utf-8"))["mcpServers"]
+    assert backed_up["meta-ads-mcp"]["env"]["META_ACCESS_TOKEN"] == setup_wizard.REDACTED
+    assert backed_up["meta-ads-mcp"]["env"]["META_APP_ID"] == APP_ID
+    assert backed_up["other"] == OTHER_SERVER
+    assert "EAA-placeholder" not in backup.read_text(encoding="utf-8")
+    assert "rotate" in console.text()
+    assert list(config_path.parent.glob("*.tmp*")) == []
     assert [key for key, _, _ in system.calls] == ["venv", "pip", "pytest", "store_secrets --status", "store_secrets", "check_token"]
 
 
@@ -111,7 +116,7 @@ def test_existing_venv_can_skip_reinstall(root, tmp_path):
 
 @pytest.mark.parametrize("options, message", [
     ({"platform_name": "Linux"}, "only supports Windows"),
-    ({"python": (3, 9, 18)}, "3.10 or newer"),
+    ({"python": (3, 10, 14)}, "3.11 or newer"),
 ])
 def test_prerequisite_failures_abort(root, options, message):
     wizard, console, system = make_wizard(root, [], **options)
@@ -251,3 +256,22 @@ def test_instagram_is_off_by_default(root, tmp_path):
     assert "META_ENABLE_INSTAGRAM_INSIGHTS" not in env
     [(_, _, token_env)] = [call for call in system.calls if call[0] == "check_token"]
     assert token_env is None
+
+
+@pytest.mark.parametrize("content", ["[]", '{"mcpServers": []}', '{"mcpServers": {"x": "not a server"}}'])
+def test_unexpected_config_structure_is_left_untouched(root, tmp_path, content):
+    config_path = tmp_path / "c.json"
+    config_path.write_text(content, encoding="utf-8")
+    wizard, console, _ = make_wizard(root, [APP_ID, "", "", "n", "", "", ""], config_path, results={"store_secrets --status": 1})
+
+    assert wizard.run() == 0
+    assert config_path.read_text(encoding="utf-8") == content
+    assert "configuration" in console.text()
+
+
+def test_unicode_digits_are_asked_again_instead_of_crashing(root, tmp_path):
+    answers = [APP_ID, "", "", "n", "²", "100", "", "", ""]
+    wizard, console, _ = make_wizard(root, answers, tmp_path / "c.json", results={"store_secrets --status": 1})
+
+    assert wizard.run() == 0
+    assert "positive whole number" in console.text()

@@ -123,3 +123,51 @@ def test_package_basic_config_becomes_no_op(isolated_root_logger, tmp_path):
 
     assert len(file_handlers()) == 1
     assert not (tmp_path / "other.log").exists()
+
+
+def test_tracebacks_are_masked(isolated_root_logger):
+    import httpx
+
+    handler = secure_logging.harden_logging(isolated_root_logger)
+    request = httpx.Request("GET", f"https://graph.facebook.com/v24.0/1?access_token={FAKE_TOKEN}&appsecret_proof={FAKE_PROOF}")
+    try:
+        httpx.Response(400, request=request).raise_for_status()
+    except httpx.HTTPStatusError:
+        logging.getLogger("meta-ads-mcp").exception("create_ad_creative failed")
+    handler.flush()
+    content = isolated_root_logger.read_text(encoding="utf-8")
+
+    assert "create_ad_creative failed" in content
+    assert "Traceback" in content
+    assert FAKE_TOKEN not in content
+    assert FAKE_PROOF not in content
+
+
+def test_known_secret_values_are_masked_exactly(monkeypatch):
+    secret = "0123456789abcdef" * 2
+    monkeypatch.setenv("META_APP_SECRET", secret)
+    monkeypatch.setenv("META_ACCESS_TOKEN", "short-token-value-123")
+
+    masked = secure_logging.mask_secrets(f"secret {secret} token short-token-value-123")
+
+    assert secret not in masked
+    assert "short-token-value-123" not in masked
+
+
+@pytest.mark.parametrize("key", ["input_token", "client_secret", "fb_exchange_token"])
+def test_additional_secret_parameters_are_masked(key):
+    assert secure_logging.mask_secrets(f"GET /x?{key}=abc123secret&y=1") == f"GET /x?{key}=***&y=1"
+
+
+def test_filter_never_raises_on_broken_records():
+    record = logging.LogRecord("x", logging.INFO, __file__, 1, "%d items", ("not-a-number",), None)
+
+    assert secure_logging.SecretMaskingFilter().filter(record) is True
+    assert "unformattable" in record.getMessage()
+
+
+def test_missing_appdata_falls_back_to_home(monkeypatch, tmp_path):
+    monkeypatch.delenv("APPDATA", raising=False)
+    monkeypatch.setattr(secure_logging.Path, "home", lambda: tmp_path)
+
+    assert secure_logging.default_log_path() == tmp_path / ".meta-ads-mcp" / "meta_ads_debug.log"

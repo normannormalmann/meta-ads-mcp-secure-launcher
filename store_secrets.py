@@ -10,7 +10,7 @@ import re
 import sys
 
 from i18n import add_language_argument, detect_language, t
-from launch_secure import CRED_ACCESS_TOKEN, CRED_APP_SECRET, read_windows_credential
+from launch_secure import CRED_ACCESS_TOKEN, CRED_APP_SECRET, CredentialReadError, read_windows_credential
 
 PROMPT_KEYS = {
     CRED_APP_SECRET: "prompt_app_secret",
@@ -80,9 +80,15 @@ def main(argv=None):
     parser.add_argument("--status", action="store_true", help="only show whether credentials are stored")
     args = parser.parse_args(argv)
     lang = detect_language(args.lang)
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="replace")
 
     if args.status:
-        return print_status(read_windows_credential, lang)
+        try:
+            return print_status(read_windows_credential, lang)
+        except CredentialReadError as err:
+            print(f"meta-ads-mcp: {err}", file=sys.stderr)
+            return 2
     for target in PROMPT_KEYS:
         secret = prompt_secret(target, lang)
         if secret is None:

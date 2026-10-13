@@ -227,3 +227,128 @@ def test_domain_rule_ignores_reads():
 def test_rejects_invalid_domain_configuration(value):
     with pytest.raises(ValueError, match="META_GUARD_ALLOWED_URL_DOMAINS"):
         write_guard.policy_from_env({"META_GUARD_ALLOWED_URL_DOMAINS": value})
+
+
+# --- review findings: request smuggling via upstream IDs ----------------------
+
+def raw_post(url, **data):
+    return httpx.Request("POST", url, data=data or {"name": "harmless"})
+
+
+@pytest.mark.parametrize("query", ["method=delete", "method=DELETE", "_method=delete", "batch=%5B%5D", "include_headers=true", "suppress_http_code=1"])
+def test_blocks_method_override_and_batch_keys_in_query(query):
+    assert "not allowed" in check(raw_post(f"{GRAPH}/123?{query}&x="))
+
+
+@pytest.mark.parametrize("key", ["method", "batch", "_method"])
+def test_blocks_override_keys_in_body(key):
+    assert check(post("123", **{key: "delete"})) is not None
+
+
+def test_blocks_override_keys_on_get_too():
+    assert check(httpx.Request("GET", f"{GRAPH}/123", params={"method": "delete"})) is not None
+
+
+@pytest.mark.parametrize("path", ["/v24.0/123%3Fmethod=delete", "/v24.0/123/..%2F456", "/v24.0/act_1/ads;x", "/v24.0/a b", "/123", "/v24.0/123\\x"])
+def test_blocks_unexpected_graph_paths(path):
+    assert check(httpx.Request("GET", "https://graph.facebook.com" + path)) is not None
+
+
+@pytest.mark.parametrize("path", ["/v24.0/act_123/campaigns", "/v24.0/me/adaccounts", "/v24.0/123456789", "/v24.0/search", "/v24.0/act_1/adimages"])
+def test_allows_regular_graph_paths(path):
+    assert check(httpx.Request("GET", "https://graph.facebook.com" + path, params={"fields": "id"})) is None
+
+
+def test_post_query_may_only_carry_auth_parameters():
+    assert check(raw_post(f"{GRAPH}/123?access_token=T&appsecret_proof=P")) is None
+    assert check(raw_post(f"{GRAPH}/123?status=ACTIVE")) is not None
+
+
+def test_duplicate_keys_are_all_checked():
+    request = httpx.Request("POST", f"{GRAPH}/123", content=b"status=PAUSED&status=DELETED",
+                            headers={"content-type": "application/x-www-form-urlencoded"})
+
+    assert "DELETED" in check(request)
+
+
+def test_status_with_whitespace_is_blocked():
+    assert check(post("123", status=" deleted ")) is not None
+
+
+def test_other_graph_hosts_are_guarded():
+    assert check(httpx.Request("DELETE", "https://graph-video.facebook.com/v24.0/123")) is not None
+
+
+# --- review findings: nested budgets and statuses ----------------------------
+
+def test_blocks_nested_budget_in_json_field():
+    request = post("123", adset_budgets=json.dumps([{"adset_id": "1", "daily_budget": 99_999_999}]))
+
+    assert "daily_budget" in check(request)
+
+
+def test_blocks_nested_status_in_json_field():
+    assert check(post("123", some_spec=json.dumps({"children": [{"status": "ARCHIVED"}]}))) is not None
+
+
+def test_allows_nested_budget_within_limit():
+    assert check(post("123", adset_budgets=json.dumps([{"adset_id": "1", "daily_budget": 1000}]))) is None
+
+
+def test_bracketed_plain_text_is_not_treated_as_json():
+    assert check(post("act_1/campaigns", name="[Sale] Autumn")) is None
+
+
+@pytest.mark.parametrize("value", ["nan", "inf", "1e400", "-inf"])
+def test_non_finite_limits_are_rejected_cleanly(value):
+    with pytest.raises(ValueError, match="META_GUARD_MAX_DAILY_BUDGET"):
+        write_guard.policy_from_env({"META_GUARD_MAX_DAILY_BUDGET": value})
+
+
+@pytest.mark.parametrize("value", ["nan", "inf"])
+def test_non_finite_multiplier_is_blocked(value):
+    assert check(post("123/budget_schedules", budget_value=value, budget_value_type="MULTIPLIER")) is not None
+
+
+@pytest.mark.parametrize("value", ["1_000", "１０"])
+def test_amounts_must_be_plain_ascii_digits(value):
+    assert check(post("123", daily_budget=value)) is not None
+
+
+def test_undecodable_body_is_blocked_not_raised():
+    request = httpx.Request("POST", f"{GRAPH}/123", content=b"name=\xff\xfe", headers={"content-type": "application/x-www-form-urlencoded"})
+
+    assert check(request) is not None
+
+
+# --- review findings: url_policy hardening -----------------------------------
+
+@pytest.mark.parametrize("link", [
+    "https://evil.com\\.example.com/x",
+    "https://evil.com%5c.example.com/x",
+    "https://example.com:8443/x",
+    "https://exa mple.com/x",
+    "https://exämple.com/x",
+    "https://example.com/\x00",
+])
+def test_blocks_parser_differential_urls(link):
+    assert check(link_creative(link), DOMAINS) is not None
+
+
+@pytest.mark.parametrize("key", ["url", "object_url", "app_link", "link_deep_link_url", "object_store_url", "anything_new"])
+def test_any_url_valued_key_is_a_destination(key):
+    spec = {"template_url_spec": {"web": {key: "https://evil.com/"}}}
+
+    assert check(creative(object_story_spec=spec), DOMAINS) is not None
+
+
+@pytest.mark.parametrize("key", ["display_url", "thumbnail_url", "image_url", "picture"])
+def test_media_and_display_urls_are_not_destinations(key):
+    spec = {"link_data": {"link": "https://example.com/", key: "https://cdn.other.test/x.jpg"}}
+
+    assert check(creative(object_story_spec=spec), DOMAINS) is None
+
+
+def test_unparseable_known_spec_field_is_blocked_but_plain_text_is_not():
+    assert check(post("act_1/adcreatives", object_story_spec="{broken"), DOMAINS) is not None
+    assert check(post("act_1/adcreatives", name="[Sale] {{product.name}}"), DOMAINS) is None

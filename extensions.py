@@ -3,7 +3,6 @@
 Registered on the upstream FastMCP server before it starts. The tools use the
 launcher's own graph_client, not meta-ads-mcp internals.
 """
-import json
 import os
 from datetime import datetime, timezone
 
@@ -11,10 +10,11 @@ import delivery
 import instagram
 import settings
 from graph_client import GraphClient, GraphError
-from settings import ENV_DEFAULT_ACCOUNT, parse_account_id
+from tool_output import clamp, error_text, json_text
 
 DEFAULT_CAMPAIGN_LIMIT = 100
 MAX_CAMPAIGN_LIMIT = 500
+DELIVERY_PAGE_SIZE = 25  # each campaign carries up to 100 nested ad sets
 TOOL_NAMES = ("get_campaign_delivery",)
 
 DELIVERY_DESCRIPTION = """Get campaigns with a computed delivery status like the "Delivery" column in Meta Ads Manager.
@@ -32,25 +32,27 @@ Args:
 """
 
 
-def _error(message):
-    return json.dumps({"error": message}, indent=2)
-
-
 def make_campaign_delivery_tool(client_factory, default_account, clock):
     async def get_campaign_delivery(account_id: str = "", delivery_filter: str = "", limit: int = DEFAULT_CAMPAIGN_LIMIT) -> str:
         try:
-            account = parse_account_id(account_id) or default_account
+            account = settings.parse_account_id(account_id) or default_account
         except ValueError:
-            return _error(f"Invalid account_id {account_id!r}; expected act_<digits>.")
+            return error_text(f"Invalid account_id {account_id!r}; expected act_<digits>.")
         if not account:
-            return _error("No account_id given and no default account configured.")
-        max_items = max(1, min(int(limit), MAX_CAMPAIGN_LIMIT))
+            return error_text("No account_id given and no default account configured.")
         try:
-            campaigns = await client_factory().get_all(f"{account}/campaigns", {"fields": delivery.CAMPAIGN_FIELDS}, max_items=max_items)
+            max_items = clamp(limit, MAX_CAMPAIGN_LIMIT)
+        except (TypeError, ValueError):
+            return error_text(f"Invalid limit {limit!r}; expected a whole number up to {MAX_CAMPAIGN_LIMIT}.")
+        try:
+            campaigns = await client_factory().get_all(f"{account}/campaigns", {"fields": delivery.CAMPAIGN_FIELDS},
+                                                       max_items=max_items + 1, page_size=DELIVERY_PAGE_SIZE)
         except GraphError as err:
-            return _error(str(err))
+            return error_text(str(err))
+        truncated, campaigns = len(campaigns) > max_items, campaigns[:max_items]
         summary = delivery.summarize(campaigns, clock(), only=delivery_filter or None)
-        return json.dumps({"account_id": account, "generated_at": clock().isoformat(), **summary}, indent=2, ensure_ascii=False)
+        return json_text({"account_id": account, "generated_at": clock().isoformat(),
+                          "fetched": len(campaigns), "truncated": truncated, **summary})
 
     return get_campaign_delivery
 
@@ -64,7 +66,7 @@ def _instructions(existing, default_account):
 def register(server, environ=None, client_factory=None, clock=None):
     """Adds the launcher tools (Instagram tools only if enabled) and default-account instructions."""
     environ = os.environ if environ is None else environ
-    default_account = parse_account_id(environ.get(ENV_DEFAULT_ACCOUNT))
+    default_account = settings.parse_account_id(environ.get(settings.ENV_DEFAULT_ACCOUNT))
     client_factory = client_factory or (lambda: GraphClient.from_env(environ))
     clock = clock or (lambda: datetime.now(timezone.utc))
 

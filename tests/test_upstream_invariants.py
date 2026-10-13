@@ -44,3 +44,16 @@ def test_scan_does_not_import_the_package():
 
     assert "setup_logging" in source  # parsed as text; importing would write to the real log
     assert ast.parse(source)
+
+
+def test_upstream_names_the_launcher_relies_on_still_exist():
+    root = upstream_scan.package_dir()
+    server = (root / "core" / "server.py").read_text(encoding="utf-8")
+    package = (root / "__init__.py").read_text(encoding="utf-8")
+    utils = (root / "core" / "utils.py").read_text(encoding="utf-8")
+
+    assert "mcp_server = FastMCP(" in server
+    assert "entrypoint" in package
+    assert 'getLogger("meta-ads-mcp")' in utils
+    assert "META_ADS_DISABLE_CALLBACK_SERVER" in (root / "core" / "callback_server.py").read_text(encoding="utf-8")
+    assert "META_ADS_DISABLE_LOGIN_LINK" in (root / "core" / "authentication.py").read_text(encoding="utf-8")

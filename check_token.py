@@ -14,10 +14,10 @@ from datetime import datetime
 
 import httpx
 
-from graph_client import GRAPH_BASE_URL
 import settings
+from graph_client import GRAPH_BASE_URL
 from i18n import add_language_argument, detect_language, t
-from launch_secure import load_secrets
+from launch_secure import read_secrets
 
 GRAPH_DEBUG_URL = f"{GRAPH_BASE_URL}/debug_token"
 WARN_DAYS = 14
@@ -83,8 +83,11 @@ def fetch_debug_data(app_id, secrets):
     }
     response = httpx.get(GRAPH_DEBUG_URL, params=params, timeout=REQUEST_TIMEOUT)
     payload = response.json()
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"unexpected response (HTTP {response.status_code})")
     if "error" in payload:
-        raise RuntimeError(payload["error"].get("message", "unknown error"))
+        error = payload["error"]
+        raise RuntimeError(error.get("message", "unknown error") if isinstance(error, dict) else str(error))
     return payload["data"]
 
 
@@ -94,18 +97,20 @@ def main(argv=None):
     parser.add_argument("--app-id", help="Meta App ID (default: META_APP_ID)")
     args = parser.parse_args(argv)
     lang = detect_language(args.lang)
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="replace")
 
     app_id = resolve_app_id(args.app_id, os.environ)
     if not app_id:
         print(t(lang, "token_missing_app_id"), file=sys.stderr)
         return 2
     try:
-        data = fetch_debug_data(app_id, load_secrets())
+        data = fetch_debug_data(app_id, read_secrets())
     except httpx.HTTPError as err:
         # str(err) may contain the request URL incl. token and secret
         print(t(lang, "token_network_error", kind=type(err).__name__), file=sys.stderr)
         return 2
-    except (RuntimeError, KeyError, ValueError) as err:
+    except (RuntimeError, KeyError, ValueError) as err:  # incl. CredentialsMissing/CredentialReadError
         print(t(lang, "token_failed", kind=type(err).__name__, detail=err), file=sys.stderr)
         return 2
 

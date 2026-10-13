@@ -94,7 +94,7 @@ def test_main_without_app_id_fails_with_message(capsys, monkeypatch):
 @pytest.mark.parametrize("lang", ["de", "en"])
 def test_main_prints_report_without_secrets(capsys, monkeypatch, lang):
     secrets = {"META_APP_SECRET": "s" * 32, "META_ACCESS_TOKEN": "EAA" + "z" * 100}
-    monkeypatch.setattr(check_token, "load_secrets", lambda: secrets)
+    monkeypatch.setattr(check_token, "read_secrets", lambda: secrets)
     monkeypatch.setattr(check_token, "fetch_debug_data", lambda app_id, loaded: debug_data(expires_at=0))
 
     exit_code = check_token.main(["--app-id", "123456789", "--lang", lang])
@@ -113,3 +113,15 @@ def test_instagram_insights_scope_needed_only_when_enabled():
 
     assert "instagram_manage_insights" in default.warnings[0]
     assert enabled.warnings == []
+
+
+def test_missing_credentials_are_an_error_not_a_warning(capsys, monkeypatch):
+    import launch_secure
+
+    def missing():
+        raise launch_secure.CredentialsMissing(["META_ACCESS_TOKEN"])
+
+    monkeypatch.setattr(check_token, "read_secrets", missing)
+
+    assert check_token.main(["--app-id", "123456789", "--lang", "en"]) == 2
+    assert "META_ACCESS_TOKEN" in capsys.readouterr().err
