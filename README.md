@@ -80,7 +80,7 @@ flowchart LR
 ## Requirements
 
 - **Windows 10/11** (credentials in the Windows Credential Manager) or **macOS** (credentials in the Keychain)
-- **Python 3.11 or newer** – [python.org](https://www.python.org/downloads/). On macOS also via Homebrew (`brew install python`). The `python3` from Apple's Command Line Tools (3.9) is too old; check with `python3 --version`.
+- **Python 3.11 to 3.14** – [python.org](https://www.python.org/downloads/). On macOS also via Homebrew (`brew install python@3.13`). The `python3` from Apple's Command Line Tools (3.9) is too old, and for newer versions (3.15+) some pinned dependencies are not available yet. Check with `python3 --version`; if it does not fit, start the wizard with the version you installed, e.g. `python3.13 setup_wizard.py`.
 - **Claude Desktop** – [claude.ai/download](https://claude.ai/download)
 - A **Meta app** with the Marketing API and an **access token** for it, preferably from a system user
 
@@ -99,7 +99,7 @@ macOS (Terminal):
 ```bash
 git clone https://github.com/normannormalmann/meta-ads-mcp-secure-launcher.git
 cd meta-ads-mcp-secure-launcher
-python3 setup_wizard.py
+python3 setup_wizard.py      # or python3.13 setup_wizard.py, see Requirements
 ```
 
 The wizard asks for the language first (`--lang en` or `--lang de` skips the question). Every change needs your confirmation. The screenshots below come from a simulated run with placeholder data (`tools/render_screenshots.py`).
@@ -170,7 +170,7 @@ Then add this entry under `mcpServers` in `%APPDATA%\Claude\claude_desktop_confi
 **macOS** (Terminal):
 
 ```bash
-python3 -m venv venv
+python3.13 -m venv venv      # any Python 3.11-3.14
 venv/bin/python -m pip install -r requirements.lock
 venv/bin/python -m pytest -q                 # self-test
 venv/bin/python store_secrets.py             # hidden input, stored in the macOS Keychain

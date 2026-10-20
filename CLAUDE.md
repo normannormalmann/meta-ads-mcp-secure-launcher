@@ -8,7 +8,7 @@ A hardened launcher (Windows and macOS) around the upstream PyPI package `meta-a
 
 ## Commands
 
-All commands run with the venv interpreter, Python 3.11+ (shown for Windows; on macOS use `venv/bin/python`):
+All commands run with the venv interpreter, Python 3.11–3.14 (`setup_wizard.MAX_PYTHON`: newer versions lack prebuilt wheels for pinned deps) (shown for Windows; on macOS use `venv/bin/python`):
 
 ```powershell
 venv\Scripts\python.exe -m pip install -r requirements.lock      # pinned, audited deps (incl. meta-ads-mcp version)

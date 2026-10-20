@@ -1,6 +1,6 @@
 """Interactive setup wizard for the meta-ads-mcp secure launcher (Windows and macOS).
 
-Run with Python 3.11+:  python setup_wizard.py (macOS: python3 setup_wizard.py) [--lang de|en] [--claude-config PATH]
+Run with Python 3.11-3.14:  python setup_wizard.py (macOS: python3 setup_wizard.py) [--lang de|en] [--claude-config PATH]
 
 Uses only the standard library, because it creates the virtual environment
 that holds the actual dependencies. Every change asks for confirmation first.
@@ -23,6 +23,7 @@ from i18n import LANGUAGES, add_language_argument, detect_language, platform_tex
 ROOT = Path(__file__).resolve().parent
 SERVER_NAME = "meta-ads"
 MIN_PYTHON = (3, 11)  # starlette in requirements.lock needs 3.11+
+MAX_PYTHON = (3, 14)  # newest version with prebuilt packages for everything in requirements.lock
 TOTAL_STEPS = 7
 DEFAULT_DAILY_LIMIT = 250
 DEFAULT_LIFETIME_LIMIT = 5000
@@ -273,6 +274,9 @@ class Wizard:
         version = ".".join(map(str, self.system.python_version()))
         if self.system.python_version() < MIN_PYTHON:
             self._error("err_python", required=".".join(map(str, MIN_PYTHON)), version=version)
+            return False
+        if self.system.python_version()[:2] > MAX_PYTHON:
+            self._error("err_python_too_new", maximum=".".join(map(str, MAX_PYTHON)), version=version)
             return False
         self._ok("ok_python", version=version)
         if not self.system.exists(self.root / "requirements.lock"):

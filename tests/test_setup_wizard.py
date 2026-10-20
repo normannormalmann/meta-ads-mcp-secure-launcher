@@ -117,6 +117,7 @@ def test_existing_venv_can_skip_reinstall(root, tmp_path):
 @pytest.mark.parametrize("options, message", [
     ({"platform_name": "Linux"}, "only supports Windows and macOS"),
     ({"python": (3, 10, 14)}, "3.11 or newer"),
+    ({"python": (3, 15, 0)}, "python3.14 setup_wizard.py"),
 ])
 def test_prerequisite_failures_abort(root, options, message):
     wizard, console, system = make_wizard(root, [], **options)

@@ -80,7 +80,7 @@ flowchart LR
 ## Voraussetzungen
 
 - **Windows 10/11** (Zugangsdaten im Windows-Anmeldeinformationsspeicher) oder **macOS** (Zugangsdaten im Schlüsselbund)
-- **Python 3.11 oder neuer**: [python.org](https://www.python.org/downloads/). Unter macOS auch über Homebrew (`brew install python`). Das `python3` aus Apples Command Line Tools (3.9) ist zu alt; mit `python3 --version` prüfen.
+- **Python 3.11 bis 3.14**: [python.org](https://www.python.org/downloads/). Unter macOS auch über Homebrew (`brew install python@3.13`). Das `python3` aus Apples Command Line Tools (3.9) ist zu alt, und für neuere Versionen (3.15+) gibt es einige der festgelegten Abhängigkeiten noch nicht. Mit `python3 --version` prüfen; passt die Version nicht, den Assistenten mit der installierten Version starten, z. B. `python3.13 setup_wizard.py`.
 - **Claude Desktop**: [claude.ai/download](https://claude.ai/download)
 - Eine **Meta-App** mit Marketing API und einem **Access-Token** dafür, am besten von einem Systemnutzer
 
@@ -99,7 +99,7 @@ macOS (Terminal):
 ```bash
 git clone https://github.com/normannormalmann/meta-ads-mcp-secure-launcher.git
 cd meta-ads-mcp-secure-launcher
-python3 setup_wizard.py
+python3 setup_wizard.py      # oder python3.13 setup_wizard.py, siehe Voraussetzungen
 ```
 
 Der Assistent fragt zuerst nach der Sprache, mit `--lang de` oder `--lang en` entfällt die Frage. Jede Änderung musst du bestätigen. Die Screenshots unten stammen aus einem simulierten Lauf mit Platzhalterdaten (`tools/render_screenshots.py`).
@@ -170,7 +170,7 @@ Danach diesen Eintrag unter `mcpServers` in `%APPDATA%\Claude\claude_desktop_con
 **macOS** (Terminal):
 
 ```bash
-python3 -m venv venv
+python3.13 -m venv venv      # beliebiges Python 3.11-3.14
 venv/bin/python -m pip install -r requirements.lock
 venv/bin/python -m pytest -q                 # Selbsttest
 venv/bin/python store_secrets.py             # verdeckte Eingabe, Speicherung im macOS-Schlüsselbund
