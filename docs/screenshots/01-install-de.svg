@@ -9,12 +9,12 @@
 <tspan x="20" y="69"><tspan fill="#ffffff" font-weight="700">meta-ads-mcp Secure Launcher - Einrichtungsassistent</tspan></tspan>
 <tspan x="20" y="89"><tspan fill="#484f58">========================================================================================</tspan></tspan>
 <tspan x="20" y="109"><tspan fill="#c9d1d9">Dieser Assistent installiert meta-ads-mcp, speichert deine Meta-Zugangsdaten im Windows-</tspan></tspan>
-<tspan x="20" y="129"><tspan fill="#c9d1d9">Anmeldeinformationsspeicher und verbindet den abgesicherten Starter mit Claude Desktop.</tspan></tspan>
-<tspan x="20" y="149"><tspan fill="#c9d1d9">Ohne Rückfrage wird nichts verändert.</tspan></tspan>
+<tspan x="20" y="129"><tspan fill="#c9d1d9">Anmeldeinformationsspeicher bzw. im macOS-Schlüsselbund und verbindet den abgesicherten</tspan></tspan>
+<tspan x="20" y="149"><tspan fill="#c9d1d9">Starter mit Claude Desktop. Ohne Rückfrage wird nichts verändert.</tspan></tspan>
 <tspan x="20" y="169"><tspan fill="#c9d1d9"></tspan></tspan>
 <tspan x="20" y="189"><tspan fill="#d2a8ff" font-weight="700">Schritt 1/7: Voraussetzungen prüfen</tspan></tspan>
 <tspan x="20" y="209"><tspan fill="#484f58">----------------------------------------------------------------------------------------</tspan></tspan>
-<tspan x="20" y="229"><tspan fill="#3fb950">[OK] Windows erkannt.</tspan></tspan>
+<tspan x="20" y="229"><tspan fill="#3fb950">[OK] Windows erkannt, Zugangsdaten kommen in den Windows-Anmeldeinformationsspeicher.</tspan></tspan>
 <tspan x="20" y="249"><tspan fill="#3fb950">[OK] Python 3.13.1 gefunden.</tspan></tspan>
 <tspan x="20" y="269"><tspan fill="#3fb950">[OK] requirements.lock gefunden.</tspan></tspan>
 <tspan x="20" y="289"><tspan fill="#c9d1d9"></tspan></tspan>

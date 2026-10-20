@@ -2,7 +2,7 @@
 
 [English](README.md) · **Deutsch**
 
-Ein abgesicherter Starter für [`meta-ads-mcp`](https://github.com/pipeboard-co/meta-ads-mcp) unter Windows. Damit arbeitet Claude Desktop mit deinen Meta-Werbekonten (Facebook/Instagram), **ohne Zugangsdaten im Klartext in Konfigurationsdateien, ohne Tokens in Logdateien und mit einer lokalen Sicherung für Schreibzugriffe**.
+Ein abgesicherter Starter für [`meta-ads-mcp`](https://github.com/pipeboard-co/meta-ads-mcp) unter Windows und macOS. Damit arbeitet Claude Desktop mit deinen Meta-Werbekonten (Facebook/Instagram), **ohne Zugangsdaten im Klartext in Konfigurationsdateien, ohne Tokens in Logdateien und mit einer lokalen Sicherung für Schreibzugriffe**.
 
 Der Starter verändert `meta-ads-mcp` nicht. Er installiert das Originalpaket von PyPI, startet es über eine kleine Hülle und ergänzt die unten beschriebenen Schutzmaßnahmen. Ein zweisprachiger Einrichtungsassistent (Deutsch/Englisch) führt Schritt für Schritt durch die Einrichtung.
 
@@ -36,7 +36,7 @@ In der üblichen `meta-ads-mcp`-Einrichtung stehen `META_APP_SECRET` und `META_A
 
 | Problem | Risiko | Gelöst durch |
 |---|---|---|
-| App-Secret und Access-Token im Klartext in `claude_desktop_config.json` | Wer die Datei erhält (Backup, Synchronisierung, Supportfall, Schadsoftware), kontrolliert deine Werbekonten | Zugangsdaten liegen im **Windows-Anmeldeinformationsspeicher** |
+| App-Secret und Access-Token im Klartext in `claude_desktop_config.json` | Wer die Datei erhält (Backup, Synchronisierung, Supportfall, Schadsoftware), kontrolliert deine Werbekonten | Zugangsdaten liegen im **Windows-Anmeldeinformationsspeicher** bzw. im **macOS-Schlüsselbund** |
 | Ältere `meta-ads-mcp`-Versionen (z.B. 1.0.97) schreiben jede Graph-API-URL **inklusive `access_token=…`** in ein Debug-Log, das nie gekürzt wird (bei uns 11 MB) | Token gelangt über die Logdatei nach außen | Schwärzung, INFO-Stufe, **Rotation 3 × 5 MB**. Upstream hat das Leck in späteren Versionen selbst behoben (GHSA-r3r9-3mrh-x966), die Schwärzung bleibt als zusätzliche Absicherung. |
 | Voller Schreibzugriff auf Kampagnen, Anzeigengruppen, Anzeigen und Budgets ohne Grenzen | Eine missverstandene Anweisung oder eine Prompt-Injection kann Budgets erhöhen oder Kampagnen löschen | Lokaler **Schreibschutz**, der Löschen/Archivieren und Budgets über deinen Grenzen blockiert |
 | Ein lokaler OAuth-Callback-Server und ein Login-Link-Tool sind aktiv, obwohl ein Token genutzt wird | Unnötige Angriffsfläche | Vom Starter abgeschaltet |
@@ -45,7 +45,7 @@ In der üblichen `meta-ads-mcp`-Einrichtung stehen `META_APP_SECRET` und `META_A
 
 ## Funktionen
 
-- **Keine Zugangsdaten im Klartext**: App-Secret und Token liegen im Windows-Anmeldeinformationsspeicher (DPAPI, an dein Windows-Konto gebunden). In der Claude-Desktop-Konfiguration steht nur die App-ID, und die ist nicht geheim.
+- **Keine Zugangsdaten im Klartext**: App-Secret und Token liegen im Windows-Anmeldeinformationsspeicher (DPAPI, an dein Windows-Konto gebunden) bzw. im macOS-Anmeldeschlüsselbund (mit deinem Anmeldepasswort verschlüsselt). In der Claude-Desktop-Konfiguration steht nur die App-ID, und die ist nicht geheim.
 - **Abgesichertes Logging**: Tokens und `appsecret_proof` werden geschwärzt, Debug-Ausgaben unterdrückt. Das Log ist UTF-8-kodiert und rotiert (höchstens 3 × 5 MB).
 - **Schreibschutz**: blockiert `DELETE`, die Status `DELETED`/`ARCHIVED` und Budgets über einstellbaren Grenzen, bevor die Anfrage deinen Rechner verlässt. Claude bekommt eine verständliche Fehlermeldung.
 - **Erlaubte Ziel-Domains**: beschränkt Anzeigen-Links optional auf deine eigenen Domains. Eine Prompt-Injection kann deine Anzeigen dann nicht auf fremde Seiten umleiten.
@@ -57,14 +57,14 @@ In der üblichen `meta-ads-mcp`-Einrichtung stehen `META_APP_SECRET` und `META_A
 - **Token-Prüfung**: zeigt Gültigkeit, Ablaufdatum und Rechte, ohne den Token je auszugeben, und warnt vor baldigem Ablauf und unnötigen Rechten. Lässt sich als geplante Aufgabe einrichten.
 - **Einrichtungsassistent**: installiert alles, speichert die Zugangsdaten mit sichtbarer Rückmeldung (Länge und letzte 4 Zeichen), prüft den Token und schreibt nach Rückfrage den Eintrag für Claude Desktop, mit Sicherung.
 - **Zweisprachig**: Assistent und Hilfsskripte sprechen Deutsch und Englisch.
-- **Getestet**: Unit-Tests für jedes Modul, darunter einer, der prüft, dass die Log-Absicherung mit der festgelegten Upstream-Version funktioniert.
+- **Getestet**: Unit-Tests für alle wichtigen Module, darunter einer, der prüft, dass die Log-Absicherung mit der festgelegten Upstream-Version funktioniert.
 
 ## Funktionsweise
 
 ```mermaid
 flowchart LR
     CD[Claude Desktop] -- stdio --> L[launch_secure.py]
-    WCM[(Windows-<br/>Anmeldeinformationsspeicher)] -- App-Secret + Token --> L
+    WCM[(Windows-Anmeldeinformationsspeicher<br/>oder macOS-Schlüsselbund)] -- App-Secret + Token --> L
     L --> SL[secure_logging<br/>Schwärzung + Rotation]
     L --> WG[write_guard<br/>klinkt sich in httpx ein]
     L --> M[meta-ads-mcp<br/>von PyPI]
@@ -75,16 +75,18 @@ flowchart LR
 
 1. `launch_secure.py` richtet das Logging **vor** dem Import des Pakets ein. So kann das Paket keinen eigenen, unbegrenzten Handler anlegen.
 2. Es installiert den Schreibschutz, indem es `httpx.AsyncClient.send` umhüllt. Darüber läuft jede Graph-API-Anfrage von `meta-ads-mcp`.
-3. Es liest die Zugangsdaten aus dem Windows-Anmeldeinformationsspeicher in die Prozessumgebung, schaltet OAuth-Callback-Server und Login-Link-Tool ab und startet `meta-ads-mcp`.
+3. Es liest die Zugangsdaten aus dem Windows-Anmeldeinformationsspeicher bzw. dem macOS-Schlüsselbund (`credential_store.py`) in die Prozessumgebung, schaltet OAuth-Callback-Server und Login-Link-Tool ab und startet `meta-ads-mcp`.
 
 ## Voraussetzungen
 
-- **Windows 10/11** (der Starter nutzt den Windows-Anmeldeinformationsspeicher)
-- **Python 3.11 oder neuer**: [python.org](https://www.python.org/downloads/windows/)
+- **Windows 10/11** (Zugangsdaten im Windows-Anmeldeinformationsspeicher) oder **macOS** (Zugangsdaten im Schlüsselbund)
+- **Python 3.11 oder neuer**: [python.org](https://www.python.org/downloads/). Unter macOS auch über Homebrew (`brew install python`). Das `python3` aus Apples Command Line Tools (3.9) ist zu alt; mit `python3 --version` prüfen.
 - **Claude Desktop**: [claude.ai/download](https://claude.ai/download)
 - Eine **Meta-App** mit Marketing API und einem **Access-Token** dafür, am besten von einem Systemnutzer
 
 ## Schnellstart mit dem Einrichtungsassistenten
+
+Windows (PowerShell):
 
 ```powershell
 git clone https://github.com/normannormalmann/meta-ads-mcp-secure-launcher.git
@@ -92,13 +94,23 @@ cd meta-ads-mcp-secure-launcher
 python setup_wizard.py
 ```
 
+macOS (Terminal):
+
+```bash
+git clone https://github.com/normannormalmann/meta-ads-mcp-secure-launcher.git
+cd meta-ads-mcp-secure-launcher
+python3 setup_wizard.py
+```
+
 Der Assistent fragt zuerst nach der Sprache, mit `--lang de` oder `--lang en` entfällt die Frage. Jede Änderung musst du bestätigen. Die Screenshots unten stammen aus einem simulierten Lauf mit Platzhalterdaten (`tools/render_screenshots.py`).
 
 ### 1. Voraussetzungen und Installation
 
-Der Assistent prüft Windows, die Python-Version und `requirements.lock`. Dann legt er eine virtuelle Umgebung in `venv\` an, installiert die festgelegten Abhängigkeiten und führt den Selbsttest aus.
+Der Assistent prüft das Betriebssystem, die Python-Version und `requirements.lock`. Dann legt er eine virtuelle Umgebung in `venv` an, installiert die festgelegten Abhängigkeiten und führt den Selbsttest aus.
 
 ![Einrichtungsassistent: Voraussetzungen und Installation](docs/screenshots/01-install-de.svg)
+
+Die Screenshots zeigen den Lauf unter Windows. Unter macOS sieht der Assistent genauso aus, nutzt aber `venv/bin/python`, speichert die Zugangsdaten im Schlüsselbund und schreibt in `~/Library/Application Support/Claude/claude_desktop_config.json`.
 
 ### 2. Meta-App, Zugangsdaten und Token-Prüfung
 
@@ -124,17 +136,19 @@ Du legst das maximale Tages- und Laufzeitbudget fest. Der Assistent zeigt den ge
 
 **Nach dem Assistenten:**
 
-1. Claude Desktop komplett beenden (Tray-Symbol → *Beenden*) und neu starten.
+1. Claude Desktop komplett beenden (Windows: Tray-Symbol → *Beenden*, macOS: *Claude → Claude beenden* oder `Cmd+Q`) und neu starten.
 2. In Claude Desktop unter *Einstellungen → Connectors → meta-ads* die `create_*`- und `update_*`-Tools sowie `upload_ad_image` und `create_budget_schedule` auf **„Immer fragen“** stellen.
-3. Falls deine alte Konfiguration Meta-Token und App-Secret im Klartext enthielt: Der Assistent entfernt sie aus der Sicherung, die er schreibt (andere Einträge bleiben unverändert). **Erneuere alten Token und App-Secret** trotzdem, weil sie vorher im Klartext gespeichert waren.
+3. Falls deine alte Konfiguration Meta-Token und App-Secret im Klartext enthielt: Der Assistent ersetzt den `meta-ads`-Eintrag, entfernt nach Rückfrage andere Einträge mit diesen Zugangsdaten und schwärzt sie in der Sicherung, die er schreibt (andere Einträge bleiben unverändert). **Erneuere den alten Token und das App-Secret** trotzdem, weil sie vorher im Klartext gespeichert waren.
 
 ## Manuelle Einrichtung
+
+**Windows** (PowerShell):
 
 ```powershell
 python -m venv venv
 venv\Scripts\python.exe -m pip install -r requirements.lock
 venv\Scripts\python.exe -m pytest -q          # Selbsttest
-venv\Scripts\python.exe store_secrets.py      # verdeckte Eingabe, Speicherung im Anmeldeinformationsspeicher
+venv\Scripts\python.exe store_secrets.py      # verdeckte Eingabe, Speicherung im Windows-Anmeldeinformationsspeicher
 $env:META_APP_ID = "123456789012345"
 venv\Scripts\python.exe check_token.py
 ```
@@ -145,6 +159,31 @@ Danach diesen Eintrag unter `mcpServers` in `%APPDATA%\Claude\claude_desktop_con
 "meta-ads": {
   "command": "C:\\pfad\\zu\\meta-ads-mcp-secure-launcher\\venv\\Scripts\\python.exe",
   "args": ["C:\\pfad\\zu\\meta-ads-mcp-secure-launcher\\launch_secure.py"],
+  "env": {
+    "META_APP_ID": "123456789012345",
+    "META_GUARD_MAX_DAILY_BUDGET": "250",
+    "META_GUARD_MAX_LIFETIME_BUDGET": "5000"
+  }
+}
+```
+
+**macOS** (Terminal):
+
+```bash
+python3 -m venv venv
+venv/bin/python -m pip install -r requirements.lock
+venv/bin/python -m pytest -q                 # Selbsttest
+venv/bin/python store_secrets.py             # verdeckte Eingabe, Speicherung im macOS-Schlüsselbund
+export META_APP_ID=123456789012345
+venv/bin/python check_token.py
+```
+
+Die Konfigurationsdatei ist `~/Library/Application Support/Claude/claude_desktop_config.json`:
+
+```json
+"meta-ads": {
+  "command": "/Users/du/meta-ads-mcp-secure-launcher/venv/bin/python",
+  "args": ["/Users/du/meta-ads-mcp-secure-launcher/launch_secure.py"],
   "env": {
     "META_APP_ID": "123456789012345",
     "META_GUARD_MAX_DAILY_BUDGET": "250",
@@ -171,9 +210,14 @@ Danach diesen Eintrag unter `mcpServers` in `%APPDATA%\Claude\claude_desktop_con
 
 Setzt der Starter automatisch: `META_ADS_DISABLE_CALLBACK_SERVER=1` und `META_ADS_DISABLE_LOGIN_LINK=1`.
 
-Die Zugangsdaten werden als *generische Anmeldeinformationen* mit den Namen `meta-ads-mcp/app_secret` und `meta-ads-mcp/access_token` gespeichert. Du findest sie unter *Systemsteuerung → Anmeldeinformationsverwaltung → Windows-Anmeldeinformationen*. `store_secrets.py --status` zeigt, ob sie vorhanden sind, ohne die Werte anzuzeigen.
+Die Zugangsdaten werden unter den Namen `meta-ads-mcp/app_secret` und `meta-ads-mcp/access_token` gespeichert:
 
-Logdatei: `%APPDATA%\meta-ads-mcp\meta_ads_debug.log` (+ `.1` bis `.3`). Der Starter begrenzt das Log auf INFO; `META_ADS_LOG_LEVEL=DEBUG` aus dem Originalpaket wirkt nicht.
+- **Windows:** als *generische Anmeldeinformationen*, zu finden unter *Systemsteuerung → Anmeldeinformationsverwaltung → Windows-Anmeldeinformationen*.
+- **macOS:** als Passwörter im Anmeldeschlüsselbund (Account `meta-ads-mcp`), zu finden in der App *Schlüsselbundverwaltung*. Starter und `store_secrets.py` greifen darauf mit Apples Werkzeug `/usr/bin/security` zu. Das Secret geht über die Standardeingabe, nie als Kommandozeilenargument.
+
+`store_secrets.py --status` zeigt, ob sie vorhanden sind, ohne die Werte anzuzeigen.
+
+Logdatei: `%APPDATA%\meta-ads-mcp\meta_ads_debug.log` unter Windows, `~/Library/Application Support/meta-ads-mcp/meta_ads_debug.log` unter macOS (jeweils + `.1` bis `.3`; unter macOS kann nur dein Benutzer den Ordner lesen). Der Starter begrenzt das Log auf INFO; `META_ADS_LOG_LEVEL=DEBUG` aus dem Originalpaket wirkt nicht.
 
 ## Schreibschutz
 
@@ -253,11 +297,12 @@ Mit `META_ENABLE_INSTAGRAM_INSIGHTS=1` (der Assistent fragt danach) kommen vier 
 
 ```powershell
 venv\Scripts\python.exe check_token.py --app-id 123456789012345   # oder META_APP_ID setzen
+# macOS: venv/bin/python check_token.py --app-id 123456789012345
 ```
 
 Das Skript zeigt Gültigkeit, Typ, Ablaufdatum, Ablauf des Datenzugriffs und Rechte, aber nie den Token selbst. Exit-Code `0` = in Ordnung, `1` = Warnungen (läuft in unter 14 Tagen ab, ungültig, unnötige Rechte), `2` = Fehler.
 
-Wöchentliche Prüfung als geplante Aufgabe. Das Ergebnis erscheint als *Letztes Ausführungsergebnis* in der Aufgabenplanung.
+Wöchentliche Prüfung als geplante Aufgabe unter Windows. Das Ergebnis erscheint als *Letztes Ausführungsergebnis* in der Aufgabenplanung. Unter macOS geht das mit einem `launchd`-LaunchAgent. Die Prüfung braucht den entsperrten Anmeldeschlüsselbund und läuft daher nur, solange du angemeldet bist (`cron` hat meist keinen Zugriff auf den Schlüsselbund).
 
 ```powershell
 schtasks /Create /SC WEEKLY /D MON /ST 09:00 /TN "meta-ads token check" `
@@ -274,27 +319,31 @@ venv\Scripts\python.exe -m pytest -q
 venv\Scripts\python.exe -m pip freeze --exclude-editable > requirements.lock
 ```
 
+Unter macOS stattdessen `venv/bin/python`. `pip freeze` entfernt die Plattform-Bedingung von `pywin32` (Windows) bzw. lässt `pywin32` ganz weg (macOS): Sorge dafür, dass in `requirements.lock` die Zeile `pywin32==311 ; sys_platform == "win32"` (mit der aktuellen Version) steht, sonst schlägt die Installation unter macOS fehl bzw. fehlt pywin32 unter Windows.
+
 Prüfe das Ergebnis mit [`pip-audit`](https://pypi.org/project/pip-audit/) (`pip-audit -r requirements.lock`) und starte den Server einmal. Der Starter verlässt sich auf Interna des Originalpakets (Logger-Name, Nutzung von `httpx`). Schlägt der Selbsttest nach einem Update fehl, kommst du mit `pip install -r requirements.lock` aus dem vorherigen Commit zurück.
 
 ## Fehlerbehebung
 
 | Symptom | Lösung |
 |---|---|
-| Claude Desktop zeigt den meta-ads-Server als fehlgeschlagen | `venv\Scripts\python.exe launch_secure.py` im Terminal starten. Fehlende Zugangsdaten oder ungültige Grenzen werden auf stderr gemeldet. |
-| `credentials missing in Windows Credential Manager` | `venv\Scripts\python.exe store_secrets.py` ausführen |
+| Claude Desktop zeigt den meta-ads-Server als fehlgeschlagen | `venv\Scripts\python.exe launch_secure.py` (macOS: `venv/bin/python launch_secure.py`) im Terminal starten. Fehlende Zugangsdaten oder ungültige Grenzen werden auf stderr gemeldet. |
+| `credentials missing in Windows Credential Manager` / `macOS Keychain` | `store_secrets.py` mit dem Python aus `venv` ausführen (`venv\Scripts\python.exe` bzw. `venv/bin/python`) |
+| macOS zeigt einen Schlüsselbund-Dialog (gesperrter Schlüsselbund oder von einem anderen Werkzeug angelegte Einträge) | Anmeldepasswort eingeben und *Immer erlauben* wählen. |
+| `reading '…' from the keychain failed (security exit code …)` | Anmeldeschlüsselbund entsperren (neu anmelden oder *Schlüsselbundverwaltung* öffnen) und `store_secrets.py --status` ausführen. |
 | `Blocked by local write guard` | Gewollt. Die Änderung im Werbeanzeigenmanager vornehmen oder die Grenze im Claude-Desktop-Eintrag erhöhen. |
-| Logdatei lässt sich nicht löschen | Eine alte Server-Instanz läuft noch. Claude Desktop über das Tray-Symbol beenden. |
+| Logdatei lässt sich nicht löschen (Windows) | Eine alte Server-Instanz läuft noch. Claude Desktop über das Tray-Symbol beenden. |
 | Token-Prüfung meldet `Nicht benötigte Rechte` | Neuen Systemnutzer-Token mit weniger Rechten erzeugen und `store_secrets.py` erneut ausführen |
 | Beim Einfügen ist nichts zu sehen | Normal bei verdeckter Eingabe. Nach *Enter* siehst du Zeichenanzahl und die letzten 4 Zeichen. |
 
 ## Sicherheitsmodell und Grenzen
 
 - **Schützt vor:** Zugangsdaten in Konfigurationsdateien, Backups und Support-Uploads; Tokens in Logdateien; versehentlichen oder eingeschleusten zerstörerischen Schreibaufrufen; Anzeigen-Links, die auf fremde Domains umgeleitet werden (mit erlaubten Ziel-Domains); Kampagnendaten, die an Server Dritter gehen; unnötigen lokalen Netzwerkdiensten.
-- **Schützt nicht vor:** Schadsoftware, die unter deinem Windows-Konto läuft. Sie kann den Anmeldeinformationsspeicher genauso lesen wie der Starter. Auch nicht vor Änderungen, die du selbst bestätigst, und nicht vor allem, was die Meta-Rechte des Tokens außerhalb von `meta-ads-mcp` erlauben.
-- Jedes Programm, das unter deinem Windows-Konto läuft, kann die Zugangsdaten aus dem Anmeldeinformationsspeicher lesen (es gibt keinen Schutz pro Anwendung). Der Starter schützt vor Dateien, Sicherungen und Logs, nicht vor lokaler Schadsoftware.
+- **Schützt nicht vor:** Schadsoftware, die unter deinem Benutzerkonto läuft. Sie kann den Anmeldeinformationsspeicher bzw. den Schlüsselbund genauso lesen wie der Starter. Auch nicht vor Änderungen, die du selbst bestätigst, und nicht vor allem, was die Meta-Rechte des Tokens außerhalb von `meta-ads-mcp` erlauben.
+- Jedes Programm, das unter deinem Windows-Konto läuft, kann die Zugangsdaten aus dem Anmeldeinformationsspeicher lesen (es gibt keinen Schutz pro Anwendung). Unter macOS erlauben die Schlüsselbund-Einträge den Zugriff durch `/usr/bin/security`. Jedes Programm unter deinem Benutzerkonto kann sie daher über dieses Werkzeug ohne Rückfrage lesen. Der Starter schützt vor Dateien, Sicherungen und Logs, nicht vor lokaler Schadsoftware.
 - Der Schreibschutz ist ein Sicherheitsnetz gegen Fehler und Prompt-Injection, keine Sandbox: Ob eine erlaubte Änderung geschäftlich sinnvoll ist, kann er nicht beurteilen. Lass „Immer fragen“ für Schreib-Tools eingeschaltet.
 - Der Schreibschutz funktioniert über eine Hülle um `httpx`. Nutzt eine künftige Upstream-Version einen anderen HTTP-Client, greift er nicht mehr. Dafür gibt es die festen Versionen und den Selbsttest.
-- Nur für Windows.
+- Nur für Windows und macOS (kein Linux).
 
 Sicherheitslücken bitte vertraulich melden, siehe [SECURITY.md](SECURITY.md).
 
@@ -305,16 +354,21 @@ venv\Scripts\python.exe -m pytest -q
 venv\Scripts\python.exe -m tools.render_screenshots   # docs/screenshots/*.svg neu erzeugen
 ```
 
+Unter macOS `venv/bin/python` verwenden. Die Tests laufen auf beiden Systemen; Schlüsselbund und Anmeldeinformationsspeicher werden durch Test-Attrappen ersetzt.
+
 | Datei | Zweck |
 |---|---|
 | `launch_secure.py` | Einstiegspunkt für Claude Desktop |
+| `credential_store.py` | Zugangsdaten lesen/schreiben: Windows-Anmeldeinformationsspeicher oder macOS-Schlüsselbund |
 | `secure_logging.py` | Schwärzung, Log-Stufe, Rotation |
 | `write_guard.py` | Regeln für Schreibaufrufe und gesperrte Hosts |
 | `url_policy.py` | Erlaubte Ziel-Domains für Anzeigen |
+| `form_fields.py` | Liest alle Schlüssel/Wert-Paare einer Anfrage aus (auch doppelte und verschachteltes JSON) für den Schreibschutz |
 | `tool_policy.py` | Tool-Hinweise und Größenangaben für Ergebnisse |
 | `extensions.py` | Eigene Tools und Server-Anweisung zum Standardkonto |
 | `delivery.py` | Logik für den Auslieferungsstatus |
 | `graph_client.py` | Kleiner Graph-API-Client für die eigenen Tools |
+| `tool_output.py` | JSON- und Fehlerausgabe für die eigenen Tools |
 | `settings.py` | Gemeinsame Einstellungen (Standardkonto, Instagram-Schalter) |
 | `instagram.py` | Instagram-Reels-Tools (optional) |
 | `store_secrets.py` | Zugangsdaten speichern (verdeckte Eingabe, `--status`) |

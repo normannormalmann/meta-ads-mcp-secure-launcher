@@ -115,7 +115,7 @@ def test_existing_venv_can_skip_reinstall(root, tmp_path):
 
 
 @pytest.mark.parametrize("options, message", [
-    ({"platform_name": "Linux"}, "only supports Windows"),
+    ({"platform_name": "Linux"}, "only supports Windows and macOS"),
     ({"python": (3, 10, 14)}, "3.11 or newer"),
 ])
 def test_prerequisite_failures_abort(root, options, message):
@@ -182,13 +182,13 @@ def test_find_claude_config_prefers_existing_store_install(tmp_path):
     store_config.write_text("{}", encoding="utf-8")
     environ = {"APPDATA": str(tmp_path / "Roaming"), "LOCALAPPDATA": str(tmp_path / "Local")}
 
-    assert setup_wizard.find_claude_config(environ) == store_config
+    assert setup_wizard.find_claude_config(environ, "Windows") == store_config
 
 
 def test_find_claude_config_defaults_to_appdata(tmp_path):
     environ = {"APPDATA": str(tmp_path / "Roaming"), "LOCALAPPDATA": str(tmp_path / "Local")}
 
-    assert setup_wizard.find_claude_config(environ) == tmp_path / "Roaming" / "Claude" / "claude_desktop_config.json"
+    assert setup_wizard.find_claude_config(environ, "Windows") == tmp_path / "Roaming" / "Claude" / "claude_desktop_config.json"
 
 
 def test_allowed_domains_are_normalized_and_written(root, tmp_path):
@@ -275,3 +275,39 @@ def test_unicode_digits_are_asked_again_instead_of_crashing(root, tmp_path):
 
     assert wizard.run() == 0
     assert "positive whole number" in console.text()
+
+
+def test_macos_uses_venv_bin_python_and_keychain_wording(root, tmp_path):
+    config_path = tmp_path / "claude_desktop_config.json"
+    wizard, console, system = make_wizard(root, happy_answers(legacy=False), config_path, platform_name="Darwin",
+                                          results={"store_secrets --status": 1})
+
+    assert wizard.run() == 0
+
+    entry = json.loads(config_path.read_text(encoding="utf-8"))["mcpServers"]["meta-ads"]
+    assert entry["command"] == str(root / "venv" / "bin" / "python")
+    assert all(args[0] == str(root / "venv" / "bin" / "python") for key, args, _ in system.calls if key != "venv")
+    text = console.text()
+    assert "macOS detected" in text and "macOS Keychain" in text
+    assert "Cmd+Q" in text and "venv/bin/python check_token.py" in text
+    assert "Scripts" not in text and "tray icon" not in text
+
+
+def test_german_macos_wording(root, tmp_path):
+    wizard, console, _ = make_wizard(root, [APP_ID, "", "", "j", "", "", "", ""], tmp_path / "c.json", lang="de",
+                                     platform_name="Darwin", results={"store_secrets --status": 1})
+
+    assert wizard.run() == 0
+    assert "macOS-Schlüsselbund" in console.text()
+
+
+def test_find_claude_config_on_macos(tmp_path):
+    environ = {"HOME": str(tmp_path)}
+
+    assert setup_wizard.find_claude_config(environ, "Darwin") == (
+        tmp_path / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json")
+
+
+def test_venv_python_hint_matches_platform():
+    assert setup_wizard.venv_python_hint("Windows") == "venv\\Scripts\\python.exe"
+    assert setup_wizard.venv_python_hint("Darwin") == "venv/bin/python"

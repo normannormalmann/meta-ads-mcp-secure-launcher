@@ -4,3 +4,6 @@ __pycache__/
 *.log
 *.bak*
 .env
+
+# local planning notes
+ROADMAP.md

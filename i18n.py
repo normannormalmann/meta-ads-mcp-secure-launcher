@@ -1,6 +1,7 @@
 """German/English messages for the wizard and helper scripts (stdlib only)."""
 import locale
 import os
+import sys
 
 LANGUAGES = ("en", "de")
 DEFAULT_LANGUAGE = "en"
@@ -17,7 +18,7 @@ MESSAGES = {
         "step": "Step {current}/{total}: {title}",
         # wizard
         "wizard_title": "meta-ads-mcp secure launcher - setup wizard",
-        "wizard_intro": "This wizard installs meta-ads-mcp, stores your Meta credentials in the Windows Credential Manager and connects the hardened launcher to Claude Desktop. Nothing is changed without asking you first.",
+        "wizard_intro": "This wizard installs meta-ads-mcp, stores your Meta credentials in the Windows Credential Manager or the macOS Keychain and connects the hardened launcher to Claude Desktop. Nothing is changed without asking you first.",
         "step_prerequisites": "Check prerequisites",
         "step_install": "Install meta-ads-mcp",
         "step_app": "Meta app",
@@ -25,8 +26,14 @@ MESSAGES = {
         "step_token": "Check token",
         "step_limits": "Write guard limits",
         "step_claude": "Connect Claude Desktop",
-        "ok_windows": "Windows detected.",
-        "err_windows": "This launcher only supports Windows (it uses the Windows Credential Manager).",
+        "ok_platform": "{system} detected, credentials go to the {store}.",
+        "err_platform": "This launcher only supports Windows and macOS (it uses the Windows Credential Manager or the macOS Keychain).",
+        "store_windows": "Windows Credential Manager",
+        "store_macos": "macOS Keychain",
+        "quit_windows": "tray icon -> Quit",
+        "quit_macos": "Claude menu -> Quit Claude, or Cmd+Q",
+        "paste_windows": "right-click",
+        "paste_macos": "Cmd+V",
         "ok_python": "Python {version} found.",
         "err_python": "Python {required} or newer is required, found {version}.",
         "ok_requirements": "requirements.lock found.",
@@ -52,13 +59,13 @@ MESSAGES = {
         "credentials_steps": "  1. business.facebook.com/settings -> Users -> System users -> Add\n  2. Assign only the ad accounts (and pages) Claude should manage\n  3. Generate token for your app with: ads_management, ads_read (+ business_management,\n     pages_show_list, pages_read_engagement, pages_manage_ads, instagram_basic if needed;\n     instagram_manage_insights for the Reels tools)\n  4. Copy the token and the app secret (App settings -> Basic -> App secret)",
         "credentials_present": "Credentials are already stored. Replace them?",
         "ask_store_credentials": "Store app secret and token now? Input is hidden.",
-        "ok_credentials": "Credentials stored in the Windows Credential Manager.",
-        "warn_credentials": "Credentials were not stored. You can run 'venv\\Scripts\\python.exe store_secrets.py' later.",
-        "skip_credentials": "Skipped. Run 'venv\\Scripts\\python.exe store_secrets.py' later.",
+        "ok_credentials": "Credentials stored in the {store}.",
+        "warn_credentials": "Credentials were not stored. You can run '{python} store_secrets.py' later.",
+        "skip_credentials": "Skipped. Run '{python} store_secrets.py' later.",
         "token_checking": "Asking Meta about the stored token (the token itself is never shown) ...",
         "ok_token": "Token is valid.",
         "warn_token": "Token check reported warnings - see above.",
-        "err_token": "Token check failed - see above. You can repeat it with 'venv\\Scripts\\python.exe check_token.py'.",
+        "err_token": "Token check failed - see above. You can repeat it with '{python} check_token.py'.",
         "limits_intro": "The write guard blocks budgets above these limits per campaign/ad set, as well as deleting and archiving. Amounts are in your ad account currency. Optionally, ad links can be restricted to your own domains.",
         "ask_domains": "Allowed ad destination domains (comma-separated, empty = no restriction)",
         "err_domains": "Please enter domains like example.com, shop.example.org.",
@@ -76,11 +83,11 @@ MESSAGES = {
         "warn_backup_secrets": "The old Meta token and app secret were removed from the backup (other entries are unchanged). Because they were stored in plain text before, rotate them: new token, reset app secret.",
         "skip_config": "Not changed. Add the entry above manually.",
         "finish_title": "Done. Next steps:",
-        "finish_steps": "  1. Quit Claude Desktop completely (tray icon -> Quit) and start it again\n  2. Settings -> Connectors -> meta-ads: set create_*/update_* tools to 'Always ask'\n  3. Check the token regularly: venv\\Scripts\\python.exe check_token.py",
+        "finish_steps": "  1. Quit Claude Desktop completely ({quit}) and start it again\n  2. Settings -> Connectors -> meta-ads: set create_*/update_* tools to 'Always ask'\n  3. Check the token regularly: {python} check_token.py",
         "aborted": "Setup aborted.",
         # store_secrets
-        "prompt_app_secret": "Meta app secret (hidden input, paste with right-click): ",
-        "prompt_access_token": "Meta access token (hidden input, paste with right-click): ",
+        "prompt_app_secret": "Meta app secret (hidden input, paste with {paste}): ",
+        "prompt_access_token": "Meta access token (hidden input, paste with {paste}): ",
         "secret_received": "{length} characters received, ending in ...{tail}",
         "secret_empty": "  Nothing received - please paste again.",
         "secret_invalid": "  {description} - {error}",
@@ -117,7 +124,7 @@ MESSAGES = {
         "invalid_choice": "Bitte mit j oder n antworten.",
         "step": "Schritt {current}/{total}: {title}",
         "wizard_title": "meta-ads-mcp Secure Launcher - Einrichtungsassistent",
-        "wizard_intro": "Dieser Assistent installiert meta-ads-mcp, speichert deine Meta-Zugangsdaten im Windows-Anmeldeinformationsspeicher und verbindet den abgesicherten Starter mit Claude Desktop. Ohne Rückfrage wird nichts verändert.",
+        "wizard_intro": "Dieser Assistent installiert meta-ads-mcp, speichert deine Meta-Zugangsdaten im Windows-Anmeldeinformationsspeicher bzw. im macOS-Schlüsselbund und verbindet den abgesicherten Starter mit Claude Desktop. Ohne Rückfrage wird nichts verändert.",
         "step_prerequisites": "Voraussetzungen prüfen",
         "step_install": "meta-ads-mcp installieren",
         "step_app": "Meta-App",
@@ -125,8 +132,14 @@ MESSAGES = {
         "step_token": "Token prüfen",
         "step_limits": "Grenzen für Schreibzugriffe",
         "step_claude": "Claude Desktop verbinden",
-        "ok_windows": "Windows erkannt.",
-        "err_windows": "Dieser Starter unterstützt nur Windows (er nutzt den Windows-Anmeldeinformationsspeicher).",
+        "ok_platform": "{system} erkannt, Zugangsdaten kommen in den {store}.",
+        "err_platform": "Dieser Starter unterstützt nur Windows und macOS (er nutzt den Windows-Anmeldeinformationsspeicher bzw. den macOS-Schlüsselbund).",
+        "store_windows": "Windows-Anmeldeinformationsspeicher",
+        "store_macos": "macOS-Schlüsselbund",
+        "quit_windows": "Tray-Symbol -> Beenden",
+        "quit_macos": "Claude-Menü -> Claude beenden, oder Cmd+Q",
+        "paste_windows": "Rechtsklick",
+        "paste_macos": "Cmd+V",
         "ok_python": "Python {version} gefunden.",
         "err_python": "Benötigt wird Python {required} oder neuer, gefunden: {version}.",
         "ok_requirements": "requirements.lock gefunden.",
@@ -152,13 +165,13 @@ MESSAGES = {
         "credentials_steps": "  1. business.facebook.com/settings -> Nutzer -> Systemnutzer -> Hinzufügen\n  2. Nur die Werbekonten (und Seiten) zuweisen, die Claude verwalten soll\n  3. Token für deine App erzeugen mit: ads_management, ads_read (+ business_management,\n     pages_show_list, pages_read_engagement, pages_manage_ads, instagram_basic bei Bedarf;\n     instagram_manage_insights für die Reels-Tools)\n  4. Token und App-Secret kopieren (App-Einstellungen -> Allgemein -> App-Secret)",
         "credentials_present": "Zugangsdaten sind bereits hinterlegt. Ersetzen?",
         "ask_store_credentials": "App-Secret und Token jetzt hinterlegen? Die Eingabe ist unsichtbar.",
-        "ok_credentials": "Zugangsdaten im Windows-Anmeldeinformationsspeicher gespeichert.",
-        "warn_credentials": "Zugangsdaten wurden nicht gespeichert. Später mit 'venv\\Scripts\\python.exe store_secrets.py' nachholen.",
-        "skip_credentials": "Übersprungen. Später mit 'venv\\Scripts\\python.exe store_secrets.py' nachholen.",
+        "ok_credentials": "Zugangsdaten im {store} gespeichert.",
+        "warn_credentials": "Zugangsdaten wurden nicht gespeichert. Später mit '{python} store_secrets.py' nachholen.",
+        "skip_credentials": "Übersprungen. Später mit '{python} store_secrets.py' nachholen.",
         "token_checking": "Frage Meta nach dem gespeicherten Token (der Token selbst wird nie angezeigt) ...",
         "ok_token": "Token ist gültig.",
         "warn_token": "Die Token-Prüfung hat Warnungen gemeldet - siehe oben.",
-        "err_token": "Token-Prüfung fehlgeschlagen - siehe oben. Wiederholen mit 'venv\\Scripts\\python.exe check_token.py'.",
+        "err_token": "Token-Prüfung fehlgeschlagen - siehe oben. Wiederholen mit '{python} check_token.py'.",
         "limits_intro": "Der Schreibschutz blockiert Budgets über diesen Grenzen pro Kampagne/Anzeigengruppe sowie Löschen und Archivieren. Beträge in der Währung deines Werbekontos. Optional lassen sich Anzeigen-Links auf deine eigenen Domains beschränken.",
         "ask_domains": "Erlaubte Ziel-Domains für Anzeigen (kommagetrennt, leer = keine Einschränkung)",
         "err_domains": "Bitte Domains wie example.com, shop.example.org eingeben.",
@@ -176,10 +189,10 @@ MESSAGES = {
         "warn_backup_secrets": "Der alte Meta-Token und das App-Secret wurden aus der Sicherung entfernt (andere Einträge sind unverändert). Weil sie vorher im Klartext standen, bitte erneuern: neuer Token, App-Secret zurücksetzen.",
         "skip_config": "Nicht geändert. Bitte den Eintrag oben manuell ergänzen.",
         "finish_title": "Fertig. Nächste Schritte:",
-        "finish_steps": "  1. Claude Desktop komplett beenden (Tray-Symbol -> Beenden) und neu starten\n  2. Einstellungen -> Connectors -> meta-ads: create_*/update_*-Tools auf 'Immer fragen' stellen\n  3. Token regelmäßig prüfen: venv\\Scripts\\python.exe check_token.py",
+        "finish_steps": "  1. Claude Desktop komplett beenden ({quit}) und neu starten\n  2. Einstellungen -> Connectors -> meta-ads: create_*/update_*-Tools auf 'Immer fragen' stellen\n  3. Token regelmäßig prüfen: {python} check_token.py",
         "aborted": "Einrichtung abgebrochen.",
-        "prompt_app_secret": "Meta App-Secret (Eingabe unsichtbar, Einfügen mit Rechtsklick): ",
-        "prompt_access_token": "Meta Access-Token (Eingabe unsichtbar, Einfügen mit Rechtsklick): ",
+        "prompt_app_secret": "Meta App-Secret (Eingabe unsichtbar, Einfügen mit {paste}): ",
+        "prompt_access_token": "Meta Access-Token (Eingabe unsichtbar, Einfügen mit {paste}): ",
         "secret_received": "{length} Zeichen erhalten, endet auf ...{tail}",
         "secret_empty": "  Nichts empfangen - bitte erneut einfügen.",
         "secret_invalid": "  {description} - {error}",
@@ -213,6 +226,12 @@ MESSAGES = {
 def t(lang, key, **values):
     text = MESSAGES.get(lang, MESSAGES[DEFAULT_LANGUAGE])[key]
     return text.format(**values) if values else text
+
+
+def platform_text(lang, prefix, platform=None):
+    """Platform variant of a message: prefix 'store' -> 'store_macos' on macOS, else 'store_windows'."""
+    is_macos = (platform or sys.platform).lower() == "darwin"
+    return t(lang, f"{prefix}_{'macos' if is_macos else 'windows'}")
 
 
 def detect_language(requested=None, environ=None, system_locale=None):

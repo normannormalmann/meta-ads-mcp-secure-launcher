@@ -1,6 +1,6 @@
-"""Interactive setup wizard for the meta-ads-mcp secure launcher (Windows).
+"""Interactive setup wizard for the meta-ads-mcp secure launcher (Windows and macOS).
 
-Run with any Python 3.10+:  python setup_wizard.py [--lang de|en] [--claude-config PATH]
+Run with Python 3.11+:  python setup_wizard.py (macOS: python3 setup_wizard.py) [--lang de|en] [--claude-config PATH]
 
 Uses only the standard library, because it creates the virtual environment
 that holds the actual dependencies. Every change asks for confirmation first.
@@ -18,7 +18,7 @@ from pathlib import Path
 
 import settings
 import url_policy
-from i18n import LANGUAGES, add_language_argument, detect_language, t
+from i18n import LANGUAGES, add_language_argument, detect_language, platform_text, t
 
 ROOT = Path(__file__).resolve().parent
 SERVER_NAME = "meta-ads"
@@ -32,14 +32,26 @@ REDACTED = "***removed-by-setup-wizard***"
 DIGITS = re.compile(r"[0-9]+", re.ASCII)
 WRAP_WIDTH = 88
 EXIT_OK, EXIT_FAILED, EXIT_ABORTED = 0, 1, 130
+WINDOWS, MACOS = "Windows", "Darwin"  # platform.system()
+SUPPORTED_PLATFORMS = {WINDOWS: "Windows", MACOS: "macOS"}
+VENV_PYTHON = {WINDOWS: ("Scripts", "python.exe"), MACOS: ("bin", "python")}
 
 
-def venv_python(root):
-    return root / "venv" / "Scripts" / "python.exe"
+def venv_python(root, system_name=WINDOWS):
+    return root.joinpath("venv", *VENV_PYTHON.get(system_name, VENV_PYTHON[MACOS]))
 
 
-def find_claude_config(environ):
+def venv_python_hint(system_name):
+    """Relative interpreter path for messages, e.g. venv\\Scripts\\python.exe or venv/bin/python."""
+    separator = "\\" if system_name == WINDOWS else "/"
+    return separator.join(("venv", *VENV_PYTHON.get(system_name, VENV_PYTHON[MACOS])))
+
+
+def find_claude_config(environ, system_name):
     """Microsoft Store installs keep the config in a package folder; prefer an existing one."""
+    if system_name == MACOS:
+        home = environ.get("HOME")
+        return Path(home, "Library", "Application Support", "Claude", "claude_desktop_config.json") if home else None
     local, roaming = environ.get("LOCALAPPDATA"), environ.get("APPDATA")
     if local:
         pattern = "Claude_*/LocalCache/Roaming/Claude/claude_desktop_config.json"
@@ -182,7 +194,9 @@ class Wizard:
     def __init__(self, console, system, lang, config_path, root=ROOT, now=datetime.now):
         self.console, self.system, self.lang = console, system, lang
         self.config_path, self.root, self.now = config_path, root, now
-        self.python = venv_python(root)
+        self.system_name = system.platform()
+        self.python = venv_python(root, self.system_name)
+        self.python_hint = venv_python_hint(self.system_name)
         self.app_id = None
         self.default_account = None
         self.instagram = False
@@ -193,6 +207,9 @@ class Wizard:
     # --- output helpers -------------------------------------------------
     def _t(self, key, **values):
         return t(self.lang, key, **values)
+
+    def _platform_text(self, prefix):
+        return platform_text(self.lang, prefix, self.system_name)
 
     @staticmethod
     def _wrap(text, prefix):
@@ -249,10 +266,10 @@ class Wizard:
     # --- steps ----------------------------------------------------------
     def check_prerequisites(self):
         self._heading(1, "step_prerequisites")
-        if self.system.platform() != "Windows":
-            self._error("err_windows")
+        if self.system_name not in SUPPORTED_PLATFORMS:
+            self._error("err_platform")
             return False
-        self._ok("ok_windows")
+        self._ok("ok_platform", system=SUPPORTED_PLATFORMS[self.system_name], store=self._platform_text("store"))
         version = ".".join(map(str, self.system.python_version()))
         if self.system.python_version() < MIN_PYTHON:
             self._error("err_python", required=".".join(map(str, MIN_PYTHON)), version=version)
@@ -313,12 +330,12 @@ class Wizard:
             if not self._confirm("credentials_present", default=False):
                 return True
         elif not self._confirm("ask_store_credentials"):
-            self._say("skip_credentials")
+            self._say("skip_credentials", python=self.python_hint)
             return True
         if self._run_python(script, "--lang", self.lang) == 0:
-            self._ok("ok_credentials")
+            self._ok("ok_credentials", store=self._platform_text("store"))
         else:
-            self._warn("warn_credentials")
+            self._warn("warn_credentials", python=self.python_hint)
         return True
 
     def check_token(self):
@@ -331,7 +348,7 @@ class Wizard:
         elif code == 1:
             self._warn("warn_token")
         else:
-            self._error("err_token")
+            self._error("err_token", python=self.python_hint)
         return True
 
     def ask_limits(self):
@@ -380,7 +397,7 @@ class Wizard:
     def finish(self):
         self.console.say("")
         self._say("finish_title")
-        self._say("finish_steps")
+        self._say("finish_steps", quit=self._platform_text("quit"), python=self.python_hint)
         return True
 
     def run(self):
@@ -418,7 +435,7 @@ def main(argv=None):
         lang = args.lang or choose_language(console, detect_language())
     except (EOFError, KeyboardInterrupt):
         return EXIT_ABORTED
-    config_path = args.claude_config or find_claude_config(os.environ)
+    config_path = args.claude_config or find_claude_config(os.environ, platform.system())
     return Wizard(console, LocalSystem(ROOT), lang, config_path).run()
 
 

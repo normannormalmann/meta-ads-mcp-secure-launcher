@@ -12,7 +12,7 @@ import re
 import sys
 import tempfile
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 import check_token
 import setup_wizard
@@ -22,7 +22,7 @@ from tools.wizard_fakes import FakeSystem, ScriptedConsole
 
 REPO = Path(__file__).resolve().parent.parent
 OUTPUT_DIR = REPO / "docs" / "screenshots"
-DISPLAY_ROOT = Path(r"C:\Users\you\meta-ads-mcp-secure-launcher")
+DISPLAY_ROOT = PureWindowsPath(r"C:\Users\you\meta-ads-mcp-secure-launcher")
 DISPLAY_CONFIG = r"C:\Users\you\AppData\Roaming\Claude\claude_desktop_config.json"
 PLACEHOLDER_APP_ID = "123456789012345"
 NOW = datetime(2026, 10, 13, 9, 30, 0)
@@ -47,10 +47,10 @@ FAKE_TOKEN_DATA = {
 
 def fake_outputs(lang):
     secret_lines = [
-        t(lang, "prompt_app_secret"),
+        t(lang, "prompt_app_secret", paste=t(lang, "paste_windows")),
         t(lang, "secret_ok", description=t(lang, "secret_received", length=32, tail="9f3a")),
         t(lang, "secret_saved", target="meta-ads-mcp/app_secret"),
-        t(lang, "prompt_access_token"),
+        t(lang, "prompt_access_token", paste=t(lang, "paste_windows")),
         t(lang, "secret_ok", description=t(lang, "secret_received", length=239, tail="Xk2Q")),
         t(lang, "secret_saved", target="meta-ads-mcp/access_token"),
     ]
@@ -82,7 +82,7 @@ def simulate(lang, config_path):
 
 
 def anonymize(transcript, config_path):
-    replacements = {str(config_path.parent): str(Path(DISPLAY_CONFIG).parent)}
+    replacements = {str(config_path.parent): str(PureWindowsPath(DISPLAY_CONFIG).parent)}
 
     def clean(text):
         for old, new in replacements.items():
@@ -94,7 +94,9 @@ def anonymize(transcript, config_path):
 
 def assert_no_private_data(transcript):
     text = "\n".join(line + (answer or "") for _, line, answer in transcript)
-    forbidden = [value for value in (os.environ.get("USERNAME"), os.environ.get("USERPROFILE"), tempfile.gettempdir()) if value]
+    candidates = (*(os.environ.get(name) for name in ("USERNAME", "USERPROFILE", "USER", "LOGNAME")),
+                  str(Path.home()), tempfile.gettempdir())
+    forbidden = [value for value in candidates if value]
     leaks = [value for value in forbidden if value.lower() in text.lower()]
     if leaks or re.search(r"EAA[A-Za-z0-9]{20,}", text):
         raise RuntimeError(f"screenshot transcript contains private data: {leaks or 'token-like string'}")

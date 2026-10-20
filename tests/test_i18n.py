@@ -33,3 +33,9 @@ def test_detect_language(requested, environ, system_locale, expected):
 
 def test_t_formats_values():
     assert i18n.t("en", "step", current=1, total=7, title="X") == "Step 1/7: X"
+
+
+@pytest.mark.parametrize("platform, expected", [("Darwin", "macOS Keychain"), ("darwin", "macOS Keychain"),
+                                                ("Windows", "Windows Credential Manager"), ("win32", "Windows Credential Manager")])
+def test_platform_text_picks_variant(platform, expected):
+    assert i18n.platform_text("en", "store", platform) == expected

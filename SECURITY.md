@@ -18,5 +18,5 @@ Lücken in `meta-ads-mcp` selbst gehören zum Originalprojekt: <https://github.c
 
 ## Scope / Umfang
 
-In scope: `launch_secure.py`, `secure_logging.py`, `write_guard.py`, `store_secrets.py`, `check_token.py`, `setup_wizard.py`.
+In scope: `launch_secure.py`, `credential_store.py`, `secure_logging.py`, `write_guard.py`, `form_fields.py`, `url_policy.py`, `tool_policy.py`, `graph_client.py`, `extensions.py`, `instagram.py`, `store_secrets.py`, `check_token.py`, `setup_wizard.py`.
 Known limitations are listed in the README ("Security model and limitations" / „Sicherheitsmodell und Grenzen“).

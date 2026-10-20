@@ -1,4 +1,5 @@
 import logging
+import os
 import logging.handlers
 
 import pytest
@@ -170,4 +171,22 @@ def test_missing_appdata_falls_back_to_home(monkeypatch, tmp_path):
     monkeypatch.delenv("APPDATA", raising=False)
     monkeypatch.setattr(secure_logging.Path, "home", lambda: tmp_path)
 
-    assert secure_logging.default_log_path() == tmp_path / ".meta-ads-mcp" / "meta_ads_debug.log"
+    assert secure_logging.default_log_path("win32") == tmp_path / ".meta-ads-mcp" / "meta_ads_debug.log"
+
+
+def test_macos_log_path_matches_upstream(monkeypatch, tmp_path):
+    monkeypatch.setattr(secure_logging.Path, "home", lambda: tmp_path)
+
+    expected = tmp_path / "Library" / "Application Support" / "meta-ads-mcp" / "meta_ads_debug.log"
+    assert secure_logging.default_log_path("darwin") == expected
+
+
+@pytest.mark.skipif(os.name != "posix", reason="Windows protects the profile folder with ACLs")
+def test_existing_log_dir_is_narrowed_to_owner_only(tmp_path):
+    log_dir = tmp_path / "meta-ads-mcp"
+    log_dir.mkdir(mode=0o755)
+    os.chmod(log_dir, 0o755)
+
+    secure_logging._create_log_dir(log_dir)
+
+    assert log_dir.stat().st_mode & 0o777 == 0o700

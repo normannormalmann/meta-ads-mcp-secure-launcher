@@ -17,6 +17,7 @@ import logging
 import logging.handlers
 import os
 import re
+import sys
 from pathlib import Path
 
 MAX_LOG_BYTES = 5 * 1024 * 1024
@@ -26,6 +27,7 @@ LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 NOISY_LOGGERS = ("httpx", "httpcore", "urllib3")
 SECRET_ENV_KEYS = ("META_ACCESS_TOKEN", "META_APP_SECRET")
 MIN_SECRET_LENGTH = 8
+LOG_DIR_MODE = 0o700  # owner only on macOS; Windows uses the profile's ACLs
 MASK = "***"
 
 SECRET_PATTERNS = (
@@ -71,16 +73,24 @@ class SecretMaskingFormatter(logging.Formatter):
         return mask_secrets(super().format(record))
 
 
-def default_log_path():
-    """Same location the package uses on Windows (core/utils.py:setup_logging)."""
+def default_log_path(platform=None):
+    """Same location the package uses on Windows and macOS (core/utils.py:setup_logging)."""
+    if (platform or sys.platform) == "darwin":
+        return Path.home() / "Library" / "Application Support" / "meta-ads-mcp" / "meta_ads_debug.log"
     appdata = os.environ.get("APPDATA")
     log_dir = Path(appdata) / "meta-ads-mcp" if appdata else Path.home() / ".meta-ads-mcp"
     return log_dir / "meta_ads_debug.log"
 
 
+def _create_log_dir(log_dir):
+    log_dir.mkdir(parents=True, exist_ok=True, mode=LOG_DIR_MODE)
+    if os.name == "posix" and log_dir.stat().st_mode & 0o777 != LOG_DIR_MODE:
+        os.chmod(log_dir, LOG_DIR_MODE)
+
+
 def harden_logging(log_path=None):
     log_path = Path(log_path or default_log_path())
-    log_path.parent.mkdir(parents=True, exist_ok=True)
+    _create_log_dir(log_path.parent)
 
     handler = logging.handlers.RotatingFileHandler(
         log_path, maxBytes=MAX_LOG_BYTES, backupCount=LOG_BACKUP_COUNT, encoding="utf-8", delay=True

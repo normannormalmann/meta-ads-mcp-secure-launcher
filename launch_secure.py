@@ -1,16 +1,17 @@
 """Hardened launcher for meta-ads-mcp.
 
-Reads Meta credentials from Windows Credential Manager instead of plain-text
-config, disables the local OAuth callback server, hardens the debug log
-(see secure_logging) and blocks risky write calls (see write_guard).
+Reads Meta credentials from the Windows Credential Manager or the macOS
+Keychain (see credential_store) instead of plain-text config, disables the
+local OAuth callback server, hardens the debug log (see secure_logging) and
+blocks risky write calls (see write_guard).
 Every startup problem ends with a one-line message on stderr and exit code 1;
 stdout stays reserved for the MCP protocol.
 """
 import os
 import sys
 
-CRED_APP_SECRET = "meta-ads-mcp/app_secret"
-CRED_ACCESS_TOKEN = "meta-ads-mcp/access_token"
+from credential_store import CRED_ACCESS_TOKEN, CRED_APP_SECRET, CredentialReadError, read_credential, store_name
+
 CRED_TO_ENV = {
     CRED_APP_SECRET: "META_APP_SECRET",
     CRED_ACCESS_TOKEN: "META_ACCESS_TOKEN",
@@ -19,17 +20,14 @@ HARDENING_ENV = {
     "META_ADS_DISABLE_CALLBACK_SERVER": "1",
     "META_ADS_DISABLE_LOGIN_LINK": "1",
 }
-ERROR_NOT_FOUND = 1168
-SETUP_HINT = "Run 'venv\\Scripts\\python.exe store_secrets.py' (or setup_wizard.py)."
-
-
-class CredentialReadError(RuntimeError):
-    pass
+SETUP_HINT = "Run store_secrets.py with the venv Python (or setup_wizard.py)."
+REINSTALL_HINT = ("Reinstall with '<venv python> -m pip install -r requirements.lock' "
+                  "and run '<venv python> -m pytest -q'.")
 
 
 class CredentialsMissing(RuntimeError):
     def __init__(self, missing):
-        super().__init__(f"credentials missing in Windows Credential Manager: {', '.join(missing)}")
+        super().__init__(f"credentials missing in {store_name()}: {', '.join(missing)}")
         self.missing = missing
 
 
@@ -38,25 +36,7 @@ def _fail(message):
     sys.exit(1)
 
 
-def read_windows_credential(target):
-    try:
-        import pywintypes
-        import win32cred
-    except ImportError:
-        raise CredentialReadError("pywin32 is not installed - run the setup wizard") from None
-    try:
-        cred = win32cred.CredRead(target, win32cred.CRED_TYPE_GENERIC)
-    except pywintypes.error as err:
-        if err.winerror == ERROR_NOT_FOUND:
-            return None
-        raise CredentialReadError(f"reading '{target}' failed (Windows error {err.winerror})") from None
-    try:
-        return cred["CredentialBlob"].decode("utf-16-le")
-    except UnicodeDecodeError:
-        raise CredentialReadError(f"'{target}' is not valid text - store it again") from None
-
-
-def read_secrets(cred_read=read_windows_credential):
+def read_secrets(cred_read=read_credential):
     """Returns {env name: value}; raises CredentialsMissing or CredentialReadError."""
     secrets = {env: cred_read(target) for target, env in CRED_TO_ENV.items()}
     missing = [env for env, value in secrets.items() if not value]
@@ -65,7 +45,7 @@ def read_secrets(cred_read=read_windows_credential):
     return secrets
 
 
-def load_secrets(cred_read=read_windows_credential):
+def load_secrets(cred_read=read_credential):
     try:
         return read_secrets(cred_read)
     except (CredentialsMissing, CredentialReadError) as err:
@@ -111,9 +91,7 @@ def wire_upstream(log_handler, environ):
         tool_policy.apply(mcp_server)
         return meta_ads_mcp.entrypoint
     except (ImportError, AttributeError) as err:
-        _fail(f"unsupported or broken meta-ads-mcp installation ({type(err).__name__}: {err}). "
-              "Reinstall with 'venv\\Scripts\\python.exe -m pip install -r requirements.lock' "
-              "and run 'venv\\Scripts\\python.exe -m pytest -q'.")
+        _fail(f"unsupported or broken meta-ads-mcp installation ({type(err).__name__}: {err}). {REINSTALL_HINT}")
 
 
 def main():

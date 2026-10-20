@@ -1,16 +1,18 @@
-"""Stores the Meta app secret and access token in Windows Credential Manager.
+"""Stores the Meta app secret and access token in the Windows Credential Manager or the macOS Keychain.
 
-Run interactively: venv\\Scripts\\python.exe store_secrets.py [--lang de|en]
-       Status only: venv\\Scripts\\python.exe store_secrets.py --status
-Input is hidden and never written to disk or shell history.
+Run interactively: <venv python> store_secrets.py [--lang de|en]
+       Status only: <venv python> store_secrets.py --status
+<venv python> is venv\\Scripts\\python.exe on Windows and venv/bin/python on macOS.
+Input is hidden and never written to disk, shell history or command lines.
 """
 import argparse
 import getpass
 import re
 import sys
 
-from i18n import add_language_argument, detect_language, t
-from launch_secure import CRED_ACCESS_TOKEN, CRED_APP_SECRET, CredentialReadError, read_windows_credential
+from credential_store import (CRED_ACCESS_TOKEN, CRED_APP_SECRET, CredentialReadError, CredentialWriteError,
+                              read_credential, store_name, write_credential)
+from i18n import add_language_argument, detect_language, platform_text, t
 
 PROMPT_KEYS = {
     CRED_APP_SECRET: "prompt_app_secret",
@@ -36,7 +38,7 @@ def describe(secret, lang):
 
 def prompt_secret(target, lang):
     for _ in range(MAX_ATTEMPTS):
-        secret = getpass.getpass(t(lang, PROMPT_KEYS[target])).strip()
+        secret = getpass.getpass(t(lang, PROMPT_KEYS[target], paste=platform_text(lang, "paste"))).strip()
         if not secret:
             print(t(lang, "secret_empty"))
             continue
@@ -47,21 +49,6 @@ def prompt_secret(target, lang):
         print(t(lang, "secret_ok", description=describe(secret, lang)))
         return secret
     return None
-
-
-def store_credential(target, secret):
-    import win32cred
-
-    win32cred.CredWrite(
-        {
-            "Type": win32cred.CRED_TYPE_GENERIC,
-            "TargetName": target,
-            "UserName": "meta-ads-mcp",
-            "CredentialBlob": secret,
-            "Persist": win32cred.CRED_PERSIST_LOCAL_MACHINE,
-        },
-        0,
-    )
 
 
 def print_status(cred_read, lang):
@@ -75,7 +62,7 @@ def print_status(cred_read, lang):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Store Meta credentials in Windows Credential Manager.")
+    parser = argparse.ArgumentParser(description=f"Store Meta credentials in the {store_name()}.")
     add_language_argument(parser)
     parser.add_argument("--status", action="store_true", help="only show whether credentials are stored")
     args = parser.parse_args(argv)
@@ -85,7 +72,7 @@ def main(argv=None):
 
     if args.status:
         try:
-            return print_status(read_windows_credential, lang)
+            return print_status(read_credential, lang)
         except CredentialReadError as err:
             print(f"meta-ads-mcp: {err}", file=sys.stderr)
             return 2
@@ -94,7 +81,11 @@ def main(argv=None):
         if secret is None:
             print(t(lang, "secret_aborted", target=target), file=sys.stderr)
             return 1
-        store_credential(target, secret)
+        try:
+            write_credential(target, secret)
+        except CredentialWriteError as err:
+            print(f"meta-ads-mcp: {err}", file=sys.stderr)
+            return 2
         print(t(lang, "secret_saved", target=target))
     return 0
 

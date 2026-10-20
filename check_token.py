@@ -1,6 +1,6 @@
 """Shows validity, expiry and permissions of the stored Meta access token.
 
-Run: venv\\Scripts\\python.exe check_token.py [--app-id ID] [--lang de|en]
+Run: <venv python> check_token.py [--app-id ID] [--lang de|en]
 The App ID is taken from --app-id or the META_APP_ID environment variable.
 Never prints the token or app secret. Exit code 1 if there are warnings,
 2 on errors, so it can also run as a scheduled task.

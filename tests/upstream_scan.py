@@ -1,7 +1,7 @@
 """Static (AST) inspection of the installed meta-ads-mcp package.
 
 Nothing is imported or executed: importing meta_ads_mcp would run its
-setup_logging() and write to the real %APPDATA% log.
+setup_logging() and write to the real log file.
 """
 import ast
 import importlib.util
